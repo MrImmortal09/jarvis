@@ -1,0 +1,32 @@
+[Unit]
+Description=JARVIS bridge (the brain: Claude Agent SDK behind a WebSocket)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=jarvis
+Group=jarvis
+WorkingDirectory=/opt/jarvis
+# Everything site-specific, and every secret, lives here — not in git. See
+# deploy/bridge.env.example for the shape. Read by systemd as root, so 0600
+# root:root is right.
+EnvironmentFile=/etc/jarvis/bridge.env
+Environment=HOME=/var/lib/jarvis
+# Only the reverse proxy may reach it.
+Environment=JARVIS_BRIDGE_HOST=127.0.0.1
+ExecStart=/usr/local/bin/node bridge/server.mjs
+Restart=on-failure
+RestartSec=3
+
+# The bridge runs an agent that can read files. Give it a small world.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/jarvis
+# The Claude process it spawns is the heavy part; keep it from taking neighbours
+# down on a small box.
+MemoryMax=600M
+
+[Install]
+WantedBy=multi-user.target

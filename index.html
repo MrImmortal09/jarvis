@@ -29,7 +29,9 @@
       from the markup before it reaches the DOM, so this line is the second lock
       rather than the only one.
 
-      The bridge itself is framed too, and that is what makes blades work. A
+      The bridge itself is framed too, and that is what makes blades work. In
+      development it is a different origin (localhost:8787), named below; behind
+      a reverse proxy it is this one, which is what 'self' is for. A
       publisher's X-Frame-Options is a rule enforced against the browser, so an
       article can never be framed from here directly. The bridge fetches it
       server-side and serves it back from localhost:8787, at which point the
@@ -51,7 +53,7 @@
         default-src 'self';
         base-uri 'self';
         object-src 'none';
-        frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com http://localhost:8787 http://127.0.0.1:8787;
+        frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com http://localhost:8787 http://127.0.0.1:8787;
         img-src 'self' data: blob: http://localhost:8787 http://127.0.0.1:8787;
         script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:;
         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;

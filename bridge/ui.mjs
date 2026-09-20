@@ -334,7 +334,7 @@ const GOLDEN_ANGLE = 137.507764
 /**
  * @param {(op: string, args: object) => void} emit - pushes one ui message
  */
-export function uiServer(emit) {
+export function uiServer(emit, bridgeOrigin = 'http://localhost:8787') {
   return createSdkMcpServer({
     name: 'jarvis_ui',
     version: '1.0.0',
@@ -411,7 +411,7 @@ export function uiServer(emit) {
         // Refused rather than emitted, because the page's CSP drops it silently
         // — the model would believe the image is up and describe something the
         // user cannot see. The one exception is the bridge's own /file endpoint.
-        if (/^https?:\/\//i.test(src) && !/^http:\/\/localhost:8787\//i.test(src)) {
+        if (/^https?:\/\//i.test(src) && !src.startsWith(`${bridgeOrigin}/`)) {
           return refuse(
             'Not added: remote images are blocked by the page. Orbit a file on ' +
               'this machine instead — an absolute path or a file:/// URL to ' +

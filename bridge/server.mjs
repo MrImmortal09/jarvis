@@ -27,8 +27,27 @@ import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
 import { probeUrl, renderPage } from './page.mjs'
+import { modelsServer } from './models.mjs'
 
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
+
+/**
+ * Which interface to listen on. Unset means all of them, as it always has.
+ * Behind a reverse proxy set this to 127.0.0.1, so the only way in is the
+ * proxy — and whatever it does about authentication cannot be walked around
+ * by talking to the port directly.
+ */
+const HOST = process.env.JARVIS_BRIDGE_HOST || undefined
+
+/**
+ * The address the browser reaches this bridge at, when that is not
+ * localhost:PORT. Served reading-mode pages carry absolute URLs back to /img,
+ * and the browser resolves them — so on a hosted deployment they have to name
+ * the public origin, or every picture points at the viewer's own machine.
+ */
+const PUBLIC_URL = (
+  process.env.JARVIS_PUBLIC_URL || `http://localhost:${PORT}`
+).replace(/\/+$/, '')
 
 /**
  * A crash here takes the whole assistant down mid-sentence, and most of what
@@ -265,6 +284,10 @@ function decideTool(name) {
     // a write and would hold the whole surface back behind ALLOW_WRITES.
     if (server === 'jarvis' || server === 'jarvis_ui') return true
 
+    // Choosing which model answers. It changes nothing outside this one
+    // conversation, and it is what "switch to sonnet" has to be able to do.
+    if (server === 'jarvis_models') return true
+
     // The browser server gates itself, at construction: chromeServer() only
     // builds the acting tools — click, type, form input, close tab — when
     // ALLOW_WRITES is set, so anything that reaches here at all is something
@@ -382,6 +405,14 @@ The interface itself:
   subject moves on.
 - Put it back. A colour that outlives the moment that earned it is a fault.
 - Never mention that you have done any of it. They are looking at the screen.
+
+Your own model:
+- \`list_models\` says which model is answering and which others are known.
+  \`switch_model\` changes it for the rest of this conversation.
+- Only when they ask — "use sonnet", "switch to a faster model", "which models do
+  you have". Never switch on your own initiative.
+- They can name a model that is not in the list; \`switch_model\` tries it first
+  and tells you if it is not available. Report the outcome in one short line.
 
 Their browser — ALWAYS the \`chrome_*\` tools, first, for anything to do with a
 browser or a web page:
@@ -781,7 +812,7 @@ const handleRequest = async (req, res) => {
     const target = asked.searchParams.get('url') ?? ''
     const mode = asked.searchParams.get('mode') === 'live' ? 'live' : 'reader'
     try {
-      const page = await renderPage(target, mode, `http://localhost:${PORT}`)
+      const page = await renderPage(target, mode, PUBLIC_URL)
       res.writeHead(200, { ...cors, ...page.headers })
       return res.end(page.body)
     } catch (err) {
@@ -998,9 +1029,9 @@ const wss = new WebSocketServer({
     done(true)
   },
 })
-server.listen(PORT)
+server.listen(PORT, HOST)
 
-console.log(`[jarvis] bridge listening on ws://localhost:${PORT}`)
+console.log(`[jarvis] bridge listening on ${HOST ?? 'all interfaces'}:${PORT}`)
 console.log(
   `[jarvis] speech ${elevenKey() ? 'via ElevenLabs (key from MCP config)' : 'using browser fallback voice'}`,
 )
@@ -1179,6 +1210,9 @@ wss.on('connection', (socket) => {
     // interface is the interface talking about itself, not work being done for
     // the user, and the badge would be describing the very thing they can see.
     if (name.startsWith('mcp__jarvis_ui__')) return
+    // Nor is choosing a model — it is a setting, not work, and the badge would
+    // put "jarvis · models" on screen for a lookup that takes no time at all.
+    if (name.startsWith('mcp__jarvis_models__')) return
     if (decideTool(name)) return sendTurn({ type: 'tool', name })
     if (id) heldTools.set(id, name)
   }
@@ -1189,6 +1223,13 @@ wss.on('connection', (socket) => {
     heldTools.delete(id)
     if (!failed) sendTurn({ type: 'tool', name })
   }
+
+  /**
+   * The model answering on this connection. Per connection because that is the
+   * scope of the session it changes: one browser tab asking for a different
+   * model must not move another tab's conversation.
+   */
+  let activeModel = MODEL
 
   const session = query({
     prompt: userMessages(),
@@ -1207,7 +1248,18 @@ wss.on('connection', (socket) => {
         // MCP tool names are `mcp__<key>__<tool>` and one key can only carry
         // one server; the underscore in it is why decideTool and announceTool
         // both name `jarvis_ui` explicitly.
-        jarvis_ui: uiServer((op, args) => send({ type: 'ui', op, args })),
+        jarvis_ui: uiServer((op, args) => send({ type: 'ui', op, args }), PUBLIC_URL),
+        // Which model is answering, and the means to change it. `session` is
+        // referenced from inside the handler, so it is only read once a turn
+        // is already running and the binding below has long since resolved.
+        jarvis_models: modelsServer({
+          current: () => activeModel,
+          switchTo: async (model) => {
+            await session.setModel(model)
+            activeModel = model
+            console.log(`[jarvis] model -> ${model}`)
+          },
+        }),
         // The user's own Chrome, over the extension's native-host socket. It
         // holds no per-connection state, but it is built here with the rest so
         // the write gate is read once, at the same point as everything else.
