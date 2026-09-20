@@ -352,7 +352,12 @@ export function agyQuery({ prompt, options }) {
     proc = child
     buffer = ''
 
+    // A process that has been replaced — killed by a barge-in, or swapped for a
+    // new model — keeps talking for a moment: its "cancelled" result, its exit
+    // code. Both belong to a turn that is already over, and counted against the
+    // next one they fail it. So only the current process is listened to.
     child.stdout.on('data', (chunk) => {
+      if (proc !== child) return
       buffer += chunk
       let newline
       while ((newline = buffer.indexOf('\n')) >= 0) {
@@ -371,16 +376,17 @@ export function agyQuery({ prompt, options }) {
       if (text && (debug || /error/i.test(text))) console.log('[agy]', text.slice(0, 300))
     })
     child.on('exit', (code, signal) => {
-      if (proc === child) proc = null
+      const current = proc === child
+      if (current) proc = null
       // An exit nobody asked for, mid-turn, would leave the browser waiting.
-      if (!closed && turnOpen) {
+      if (current && !closed && turnOpen) {
         console.error(`[jarvis] agy exited mid-turn (${signal ?? code})`)
         failTurn('agy exited')
       }
     })
     child.on('error', (err) => {
       console.error('[jarvis] could not start agy:', err.message)
-      failTurn(err.message)
+      if (proc === child) failTurn(err.message)
     })
   }
 
