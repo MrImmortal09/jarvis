@@ -241,6 +241,7 @@ export function agyQuery({ prompt, options }) {
   let proc = null
   let conversation = null
   let personaSent = false
+  let cancelled = false
   let turnOpen = false
   let closed = false
   let model = options.model
@@ -323,7 +324,7 @@ export function agyQuery({ prompt, options }) {
       if (result.status === 'SUCCESS') {
         emit({ type: 'result', subtype: 'success', result: result.response ?? '', total_cost_usd: null })
       } else {
-        console.error(`[jarvis] agy turn ${result.status}: ${result.error ?? ''}`)
+        if (!closed) console.error(`[jarvis] agy turn ${result.status}: ${result.error ?? ''}`)
         emit({ type: 'result', subtype: 'error_during_execution', errors: [result.error ?? result.status] })
       }
     }
@@ -397,8 +398,16 @@ export function agyQuery({ prompt, options }) {
    */
   start()
 
-  const send = (text) => {
+  const send = (raw) => {
     if (!proc) start()
+    // The resumed conversation still holds the question that was cut off, with
+    // no answer to it, and the model will cheerfully finish it before starting
+    // on the new one — measured, a story about dragons ahead of "what colour is
+    // the sky". Saying so once is enough.
+    const text = cancelled
+      ? `[The user cancelled your previous request. Do not continue it.]\n${raw}`
+      : raw
+    cancelled = false
     // The persona rides in on the first message; after that a short reminder,
     // because a voice that drifts into markdown is read out as asterisks.
     const body = personaSent
@@ -449,7 +458,11 @@ export function agyQuery({ prompt, options }) {
       proc = null
       stopped?.kill('SIGTERM')
       turnOpen = false
+      cancelled = true
       emit({ type: 'result', subtype: 'success', result: '', total_cost_usd: null })
+      // Bring the replacement up now. It needs about twelve seconds, and the
+      // user is about to spend a few of them saying what they want instead.
+      if (!closed) start()
     },
 
     async setModel(next) {
