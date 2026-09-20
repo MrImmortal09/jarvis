@@ -27,6 +27,32 @@ browser ──https──> nginx ──┬─ /            static face      (dis
    `printf 'jarvis:%s\n' "$(openssl passwd -apr1)" | sudo tee /etc/nginx/jarvis.htpasswd`
    then `nginx -t && systemctl reload nginx`.
 
+## Choosing the brain
+
+`JARVIS_BRAIN` in `/etc/jarvis/bridge.env` picks it, and `systemctl restart
+jarvis-bridge` applies it. `claude` is the default. `agy` runs Google's
+Antigravity CLI instead, pinned to `JARVIS_AGY_MODEL` (`gemini-3.8-flash-high`).
+Switching back is changing that one word.
+
+Setting up `agy` for the service user:
+
+1. Install it as that user:
+   `curl -fsSL https://antigravity.google/cli/install.sh | sudo -u jarvis env HOME=/var/lib/jarvis bash`
+2. Sign in once, as any user, by running `agy` in a terminal, choosing *Google
+   OAuth*, opening the link it prints, and pasting the code back. Use the
+   interactive `agy`, not `agy -p`: the print-mode login gives up after 60
+   seconds and takes its link with it.
+3. Give the service user a copy of the login (a plain file; there is no keyring
+   on a server): from `~/.gemini/antigravity-cli/` copy `antigravity-oauth-token`
+   and `cache/onboarding.json` and `cache/default_project_id.txt` to the same
+   paths under `/var/lib/jarvis/`, owned by `jarvis`, mode 600.
+4. Set `JARVIS_BRAIN=agy` (plus the `JARVIS_AGY_*` lines from
+   `bridge.env.example`) and restart.
+
+Each browser session gets its own `agy` process, home and workspace, deleted
+when the tab closes. It is always read-only: headless `agy` declines anything
+that needs approval, and only the JARVIS tools are allowed by name.
+
 ## Every update
 
 ```
