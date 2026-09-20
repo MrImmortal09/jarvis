@@ -28,6 +28,7 @@ import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
 import { probeUrl, renderPage } from './page.mjs'
 import { modelsServer } from './models.mjs'
+import { agyQuery, agyReady, handleMcp } from './agy.mjs'
 
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
 
@@ -118,10 +119,29 @@ function originAllowed(origin) {
 const ALLOW_WRITES = process.env.JARVIS_ALLOW_WRITES === '1'
 
 /**
+ * Which brain answers: 'claude' (Claude Code through the Agent SDK, the
+ * default) or 'agy' (Google's Antigravity CLI). Everything else in this file
+ * reads the same messages either way; see agy.mjs for how that is arranged.
+ * Changing this is the whole of switching back.
+ */
+const BRAIN = (process.env.JARVIS_BRAIN ?? 'claude').toLowerCase()
+if (BRAIN !== 'claude' && BRAIN !== 'agy') {
+  console.error(`[jarvis] JARVIS_BRAIN must be 'claude' or 'agy', not '${BRAIN}'`)
+  process.exit(1)
+}
+
+/**
  * The orchestrator model. Override with JARVIS_MODEL to trade quality for pace
  * — claude-sonnet-5 is noticeably snappier on camera if Opus feels slow.
+ *
+ * The agy brain has its own variable so that the two never trip over each
+ * other: a Claude model name is not something agy can run, and the operator who
+ * switches back should not have to edit anything but JARVIS_BRAIN.
  */
-const MODEL = process.env.JARVIS_MODEL ?? 'claude-opus-5'
+const MODEL =
+  BRAIN === 'agy'
+    ? (process.env.JARVIS_AGY_MODEL ?? 'gemini-3.8-flash-high')
+    : (process.env.JARVIS_MODEL ?? 'claude-opus-5')
 
 /**
  * How hard the model thinks before answering.
@@ -313,6 +333,23 @@ function decideTool(name) {
   return ALLOW_WRITES
 }
 
+/**
+ * Only the Claude brain can change models mid-conversation. The agy brain is
+ * pinned to one model on purpose, so it is not told there is anything to choose.
+ */
+const MODEL_NOTES =
+  BRAIN === 'claude'
+    ? `Your own model:
+- \`list_models\` says which model is answering and which others are known.
+  \`switch_model\` changes it for the rest of this conversation.
+- Only when they ask — "use sonnet", "switch to a faster model", "which models do
+  you have". Never switch on your own initiative.
+- They can name a model that is not in the list; \`switch_model\` tries it first
+  and tells you if it is not available. Report the outcome in one short line.
+
+`
+    : ''
+
 const SYSTEM_PROMPT = `You are JARVIS. You are speaking out loud to one person.
 
 LENGTH. Two sentences is the ceiling in conversation; the median is under twelve
@@ -406,15 +443,7 @@ The interface itself:
 - Put it back. A colour that outlives the moment that earned it is a fault.
 - Never mention that you have done any of it. They are looking at the screen.
 
-Your own model:
-- \`list_models\` says which model is answering and which others are known.
-  \`switch_model\` changes it for the rest of this conversation.
-- Only when they ask — "use sonnet", "switch to a faster model", "which models do
-  you have". Never switch on your own initiative.
-- They can name a model that is not in the list; \`switch_model\` tries it first
-  and tells you if it is not available. Report the outcome in one short line.
-
-Their browser — ALWAYS the \`chrome_*\` tools, first, for anything to do with a
+${MODEL_NOTES}Their browser — ALWAYS the \`chrome_*\` tools, first, for anything to do with a
 browser or a web page:
 - The \`chrome_*\` tools drive the user's own Chrome. It is already signed in to
   everything they use, it carries their real cookies, and it does not read as
@@ -694,6 +723,10 @@ function corsFor(req) {
 const http = await import('node:http')
 
 const handleRequest = async (req, res) => {
+  // The agy brain's tool endpoints. Not for browsers; handleMcp only answers
+  // this machine, so it goes ahead of the origin and CORS handling below.
+  if (req.url?.startsWith('/mcp/')) return handleMcp(req, res)
+
   const origin = req.headers.origin
   if (origin && !originAllowed(origin)) {
     console.warn(`[jarvis] refused http request from origin ${origin}`)
@@ -1035,7 +1068,17 @@ console.log(`[jarvis] bridge listening on ${HOST ?? 'all interfaces'}:${PORT}`)
 console.log(
   `[jarvis] speech ${elevenKey() ? 'via ElevenLabs (key from MCP config)' : 'using browser fallback voice'}`,
 )
-console.log(`[jarvis] model ${MODEL} · effort ${EFFORT}`)
+console.log(
+  BRAIN === 'agy'
+    ? `[jarvis] brain agy · model ${MODEL}`
+    : `[jarvis] brain claude · model ${MODEL} · effort ${EFFORT}`,
+)
+if (BRAIN === 'agy' && !agyReady()) {
+  console.warn('[jarvis] agy is not installed or not signed in — every turn will fail')
+}
+if (BRAIN === 'agy' && ALLOW_WRITES) {
+  console.warn('[jarvis] JARVIS_ALLOW_WRITES has no effect with the agy brain, which is always read-only')
+}
 console.log(
   `[jarvis] writes ${ALLOW_WRITES ? 'ENABLED' : 'disabled'}` +
     (ALLOW_WRITES ? '' : ' — set JARVIS_ALLOW_WRITES=1 to permit shell/file/device actions'),
@@ -1231,9 +1274,11 @@ wss.on('connection', (socket) => {
    */
   let activeModel = MODEL
 
-  const session = query({
+  const session = (BRAIN === 'agy' ? agyQuery : query)({
     prompt: userMessages(),
     options: {
+      // Where the agy brain's own process reaches this bridge's tool endpoints.
+      ...(BRAIN === 'agy' && { publicBase: `http://127.0.0.1:${PORT}` }),
       // Everything Claude Code has configured, plus the HUD as an in-process
       // server. The HUD's handler closes over this socket, so a `display` call
       // lands on screen directly — which is also why this object is built per
@@ -1252,13 +1297,15 @@ wss.on('connection', (socket) => {
         // Which model is answering, and the means to change it. `session` is
         // referenced from inside the handler, so it is only read once a turn
         // is already running and the binding below has long since resolved.
-        jarvis_models: modelsServer({
-          current: () => activeModel,
-          switchTo: async (model) => {
-            await session.setModel(model)
-            activeModel = model
-            console.log(`[jarvis] model -> ${model}`)
-          },
+        ...(BRAIN === 'claude' && {
+          jarvis_models: modelsServer({
+            current: () => activeModel,
+            switchTo: async (model) => {
+              await session.setModel(model)
+              activeModel = model
+              console.log(`[jarvis] model -> ${model}`)
+            },
+          }),
         }),
         // The user's own Chrome, over the extension's native-host socket. It
         // holds no per-connection state, but it is built here with the rest so
