@@ -50,6 +50,20 @@ const LOGIN_FILES = [
   'cache/default_project_id.txt',
 ]
 
+/**
+ * Hosts `agy` may read pages from. Its permission check is on the host, not the
+ * URL, and an unlisted host is declined without a word — the turn just ends
+ * empty. The default is every host: JARVIS is asked to read whatever is in the
+ * news, and a list short enough to be safe is too short to be useful. The
+ * catch is real and worth knowing: this includes addresses on this machine, so
+ * a hostile page could steer a fetch at a local service. Name hosts here,
+ * comma separated, to close that.
+ */
+const READ_HOSTS = (process.env.JARVIS_AGY_READ_HOSTS ?? '*')
+  .split(',')
+  .map((host) => host.trim())
+  .filter(Boolean)
+
 export const agyReady = () => existsSync(AGY_BIN) && existsSync(join(LOGIN_DIR, LOGIN_FILES[0]))
 
 /**
@@ -214,7 +228,7 @@ export function agyQuery({ prompt, options }) {
   }
 
   const config = {}
-  const allow = []
+  const allow = READ_HOSTS.map((host) => `read_url(${host})`)
   const mine = new Map()
   for (const [name, server] of Object.entries(options.mcpServers ?? {})) {
     if (server.type === 'sdk' && server.instance) {
@@ -242,6 +256,8 @@ export function agyQuery({ prompt, options }) {
   let conversation = null
   let personaSent = false
   let cancelled = false
+  let abandoned = false
+  let spoke = false
   let turnOpen = false
   let closed = false
   let model = options.model
@@ -258,6 +274,16 @@ export function agyQuery({ prompt, options }) {
   }
 
   function handle(event) {
+    // A turn the browser gave up on keeps running until it finishes. Nothing it
+    // produces is wanted, but its result says the process is free again.
+    if (abandoned) {
+      if (event.event === 'result') {
+        abandoned = false
+        announced.clear()
+      }
+      return
+    }
+
     if (event.event === 'init') {
       conversation = event.conversation_id ?? conversation
       emit({
@@ -273,6 +299,7 @@ export function agyQuery({ prompt, options }) {
       conversation = step.conversation_id ?? conversation
 
       if (step.step_type === 'agent_response' && step.text_delta) {
+        spoke = true
         emit({
           type: 'stream_event',
           event: { type: 'content_block_delta', delta: { type: 'text_delta', text: step.text_delta } },
@@ -322,6 +349,18 @@ export function agyQuery({ prompt, options }) {
       turnOpen = false
       announced.clear()
       if (result.status === 'SUCCESS') {
+        // A turn can end with nothing said — a tool it was not allowed to use
+        // is declined silently, and the model simply stops. For a voice that is
+        // indistinguishable from being ignored, so say something.
+        if (!spoke && !String(result.response ?? '').trim()) {
+          emit({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_delta',
+              delta: { type: 'text_delta', text: "I'm afraid I could not do that, sir." },
+            },
+          })
+        }
         emit({ type: 'result', subtype: 'success', result: result.response ?? '', total_cost_usd: null })
       } else {
         if (!closed) console.error(`[jarvis] agy turn ${result.status}: ${result.error ?? ''}`)
@@ -399,6 +438,17 @@ export function agyQuery({ prompt, options }) {
   start()
 
   const send = (raw) => {
+    // The turn that was abandoned is still going, and this message would queue
+    // behind it. Only now, with a real question waiting, is ending it worth a
+    // restart; a noise that merely sounded like a barge-in never gets here.
+    if (abandoned && proc) {
+      const stale = proc
+      proc = null
+      stale.kill('SIGTERM')
+      cancelled = true
+    }
+    abandoned = false
+    spoke = false
     if (!proc) start()
     // The resumed conversation still holds the question that was cut off, with
     // no answer to it, and the model will cheerfully finish it before starting
@@ -448,21 +498,21 @@ export function agyQuery({ prompt, options }) {
     [Symbol.asyncIterator]: () => out[Symbol.asyncIterator](),
 
     /**
-     * There is no cancel message in the streaming protocol, so a barge-in ends
-     * the process and the next question resumes the same conversation in a new
-     * one. The bridge waits for exactly one `result` per turn, so give it one.
+     * There is no cancel message in the streaming protocol, and ending the
+     * process costs a dozen seconds to bring back. The browser interrupts on
+     * anything that sounds like speech — a cough, the room — so acting on it
+     * here would restart the brain for every noise. Instead the turn is only
+     * marked abandoned: its output is dropped and the browser is told it is
+     * over, which is what it needs. The process is dealt with if, and only
+     * if, a real question turns up while it is still busy (see send).
+     *
+     * The bridge waits for exactly one `result` per turn, so give it one.
      */
     async interrupt() {
       if (!turnOpen) return
-      const stopped = proc
-      proc = null
-      stopped?.kill('SIGTERM')
+      abandoned = true
       turnOpen = false
-      cancelled = true
       emit({ type: 'result', subtype: 'success', result: '', total_cost_usd: null })
-      // Bring the replacement up now. It needs about twelve seconds, and the
-      // user is about to spend a few of them saying what they want instead.
-      if (!closed) start()
     },
 
     async setModel(next) {

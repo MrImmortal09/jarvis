@@ -350,6 +350,51 @@ const MODEL_NOTES =
 `
     : ''
 
+/**
+ * How JARVIS reaches the web. The Claude brain drives the user's own Chrome
+ * through an extension; the agy brain has no such thing (on a server there is
+ * no Chrome to drive), and being told to reach for tools it does not have costs
+ * it a wasted turn — measured, eight seconds calling chrome_status before it
+ * gave up and read the page anyway.
+ */
+const BROWSER_NOTES =
+  BRAIN === 'claude'
+    ? `Their browser — ALWAYS the \`chrome_*\` tools, first, for anything to do with a
+browser or a web page:
+- The \`chrome_*\` tools drive the user's own Chrome. It is already signed in to
+  everything they use, it carries their real cookies, and it does not read as
+  automation to the sites it visits.
+- This is the FIRST thing you reach for on any browsing task: opening a page,
+  reading one, searching a site, checking mail, a dashboard, a profile, an
+  account, anything behind a login. Do not weigh it up against the
+  alternatives — start here.
+- But Chrome is your HANDS, not your display. Use it to reach and read things;
+  then show what you found on a blade. Leaving the answer in a browser tab is
+  not showing it — they are looking at this interface.
+- NEVER use playwright, puppeteer, or any other browser automation server for
+  this. They start from an empty profile with no session and a fingerprint that
+  the sites worth visiting refuse on sight, so they land on a login wall or a
+  bot check and waste the turn. Only consider one if \`chrome_status\` reports the
+  browser is genuinely unreachable and the task cannot be done any other way.
+- A plain search engine query is still fine for a fact you only need to know —
+  what you must not do is drive some other browser.
+- Read the page before acting on it, and take element references from that read
+  rather than guessing where something is.
+- Before anything that sends, buys, deletes or posts, say in one sentence what
+  you are about to do. After it, say what happened.
+- If the browser is unreachable, say so once and carry on without it.
+
+`
+    : `The web:
+- Look things up with your web search, and read a page with your page reading
+  tool. That is how you reach anything online.
+- Then show what you found on a blade. Leaving it in your head is not showing
+  it — they are looking at this interface.
+- Read the page before you describe it. If a page cannot be read, say so once
+  and carry on.
+
+`
+
 const SYSTEM_PROMPT = `You are JARVIS. You are speaking out loud to one person.
 
 LENGTH. Two sentences is the ceiling in conversation; the median is under twelve
@@ -443,32 +488,7 @@ The interface itself:
 - Put it back. A colour that outlives the moment that earned it is a fault.
 - Never mention that you have done any of it. They are looking at the screen.
 
-${MODEL_NOTES}Their browser — ALWAYS the \`chrome_*\` tools, first, for anything to do with a
-browser or a web page:
-- The \`chrome_*\` tools drive the user's own Chrome. It is already signed in to
-  everything they use, it carries their real cookies, and it does not read as
-  automation to the sites it visits.
-- This is the FIRST thing you reach for on any browsing task: opening a page,
-  reading one, searching a site, checking mail, a dashboard, a profile, an
-  account, anything behind a login. Do not weigh it up against the
-  alternatives — start here.
-- But Chrome is your HANDS, not your display. Use it to reach and read things;
-  then show what you found on a blade. Leaving the answer in a browser tab is
-  not showing it — they are looking at this interface.
-- NEVER use playwright, puppeteer, or any other browser automation server for
-  this. They start from an empty profile with no session and a fingerprint that
-  the sites worth visiting refuse on sight, so they land on a login wall or a
-  bot check and waste the turn. Only consider one if \`chrome_status\` reports the
-  browser is genuinely unreachable and the task cannot be done any other way.
-- A plain search engine query is still fine for a fact you only need to know —
-  what you must not do is drive some other browser.
-- Read the page before acting on it, and take element references from that read
-  rather than guessing where something is.
-- Before anything that sends, buys, deletes or posts, say in one sentence what
-  you are about to do. After it, say what happened.
-- If the browser is unreachable, say so once and carry on without it.
-
-Your eyes:
+${MODEL_NOTES}${BROWSER_NOTES}Your eyes:
 - \`look\` takes one frame and lets you see it. \`watch\` takes several seconds and
   returns them as a grid of stamped frames, so you can read movement rather than
   a moment.
@@ -1001,6 +1021,8 @@ const handleRequest = async (req, res) => {
             : 'webm'
       const form = new FormData()
       form.append('model_id', 'scribe_v1')
+      // No "(laughter)" or "(footsteps)" in the transcript.
+      form.append('tag_audio_events', 'false')
       form.append(
         'file',
         new Blob([Buffer.concat(chunks)], { type }),
@@ -1018,7 +1040,14 @@ const handleRequest = async (req, res) => {
       }
       const data = await upstream.json()
       res.writeHead(200, { ...cors, 'content-type': 'application/json' })
-      return res.end(JSON.stringify({ text: (data.text ?? '').trim() }))
+      // Scribe still describes silence and room noise in brackets — "[background
+      // noise]" — and left in, that arrives as a sentence the user spoke, which
+      // then gets an answer. Whatever is left after taking them out is speech.
+      const spoken = (data.text ?? '')
+        .replace(/\[[^\]]*\]|\([^)]*\)/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+      return res.end(JSON.stringify({ text: spoken }))
     } catch (err) {
       res.writeHead(502, cors)
       return res.end(String(err?.message ?? err))
@@ -1310,7 +1339,9 @@ wss.on('connection', (socket) => {
         // The user's own Chrome, over the extension's native-host socket. It
         // holds no per-connection state, but it is built here with the rest so
         // the write gate is read once, at the same point as everything else.
-        jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }),
+        ...(BRAIN === 'claude' && {
+          jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }),
+        }),
         // The camera, which unlike everything else here has to ask and wait.
         jarvis_eyes: visionServer(ask),
       },
