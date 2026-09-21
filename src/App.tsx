@@ -25,6 +25,8 @@ import {
   watchCapture,
   watchUi,
   watchConnection,
+  watchThoughts,
+  watchTaskStatus,
   connectedLabels,
   usingBridge,
   type Msg,
@@ -170,6 +172,7 @@ export default function App() {
           // which also broke the reactor's lip-sync for the remainder.
           if (!started) store.getState().setPhase('tooling')
           store.getState().setActiveTool(name)
+          store.getState().appendThought(`Accessing tool: ${name}`, 'tool')
           sfx.play('tool')
           music.working(true)
           // Say something the moment work starts — a tool can take ten seconds
@@ -179,6 +182,10 @@ export default function App() {
             filled = true
             spk.say(forTool(name))
           }
+        },
+        onThought: (thought) => {
+          if (stale()) return
+          store.getState().appendThought(thought, 'thought')
         },
       })
 
@@ -364,6 +371,8 @@ export default function App() {
     watchServers((servers) => store.getState().setConnected(servers))
     watchPanels((panel) => store.getState().pushPanel(panel))
     watchBlades((blade) => store.getState().pushBlade(blade))
+    watchThoughts((text, source) => store.getState().appendThought(text, source))
+    watchTaskStatus((active, recent) => store.getState().setTaskStatus(active, recent))
 
     /**
      * JARVIS asking to see something.
@@ -651,10 +660,22 @@ export default function App() {
         return
       }
 
-      // Escape stands the whole thing down — the one thing the old build had
-      // no key for at all.
+      // 'T' toggles the AGY CLI Telemetry / Neural Thought Terminal
+      if ((e.key === 't' || e.key === 'T') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const activeEl = document.activeElement
+        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return
+        e.preventDefault()
+        store.getState().toggleTerminal()
+        return
+      }
+
+      // Escape stands the whole thing down or closes open overlays
       if (e.key === 'Escape') {
         e.preventDefault()
+        if (store.getState().terminalOpen) {
+          store.getState().setTerminalOpen(false)
+          return
+        }
         if (store.getState().phase !== 'offline') goDormant()
         return
       }

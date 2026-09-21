@@ -317,13 +317,13 @@ argument. You know those things. Overrule it whenever you have reason to.`
  * @param {(panel: object) => void} emit - pushes the panel to the browser
  * @param {(blade: object) => void} emitBlade - pushes a blade to the browser
  */
-export function displayServer(emit, emitBlade) {
+export function displayServer(emit, emitBlade, getTaskStatus) {
   return createSdkMcpServer({
     name: 'jarvis',
     version: '1.0.0',
     instructions:
       'The JARVIS heads-up display. Use `display` to put content on screen ' +
-      'alongside what you say.',
+      'alongside what you say. Use `get_task_status` to inspect current and recent background tasks.',
     // Never defer this behind tool search — if the model has to go looking for
     // it, it won't occur to it to show anything.
     alwaysLoad: true,
@@ -420,6 +420,18 @@ export function displayServer(emit, emitBlade) {
         async (args) => {
           const report = await probeUrl(String(args.url ?? ''))
           return { content: [{ type: 'text', text: JSON.stringify(report, null, 1) }] }
+        },
+      ),
+
+      tool(
+        'get_task_status',
+        'Check the status of current and recent background tasks, system operations, commands, or jobs that were initiated by the user (including tasks that ran in the background after the user disconnected).',
+        {
+          limit: z.number().optional().describe('Maximum number of recent tasks to return (default: 5)'),
+        },
+        async (args) => {
+          const status = getTaskStatus ? await getTaskStatus(args.limit) : { active: null, recent: [] }
+          return { content: [{ type: 'text', text: JSON.stringify(status, null, 2) }] }
         },
       ),
     ],

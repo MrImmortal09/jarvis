@@ -35,6 +35,10 @@ type Frame = {
   seconds?: number
   when?: string
   servers?: Array<string | { name?: string }>
+  source?: 'thought' | 'tool' | 'cli'
+  task?: any
+  active?: any
+  recent?: any[]
 }
 
 /** Every question gets an id so its answer can be told from anyone else's. */
@@ -98,6 +102,18 @@ export function watchBlades(fn: (blade: Blade) => void) {
 let onUi: ((op: string, args: any) => void) | null = null
 export function watchUi(fn: (op: string, args: any) => void) {
   onUi = fn
+}
+
+/** Real-time thoughts and CLI traces from agy or Claude */
+let onThought: ((text: string, source: 'thought' | 'tool' | 'cli') => void) | null = null
+export function watchThoughts(fn: (text: string, source: 'thought' | 'tool' | 'cli') => void) {
+  onThought = fn
+}
+
+/** Task status telemetry across connections */
+let onTaskStatus: ((active: any, recent?: any[]) => void) | null = null
+export function watchTaskStatus(fn: (active: any, recent?: any[]) => void) {
+  onTaskStatus = fn
 }
 
 /**
@@ -207,6 +223,10 @@ function dispatch(ws: WebSocket) {
       // A `ui` frame with no args is normal — reset and clear take none — so an
       // absent args object is an empty one, not a reason to drop the command.
       onUi?.(msg.op, (msg.args ?? {}) as Record<string, unknown>)
+    } else if (msg.type === 'thought' && msg.text) {
+      onThought?.(msg.text, msg.source ?? 'thought')
+    } else if (msg.type === 'task_status_init' || msg.type === 'task_status') {
+      onTaskStatus?.(msg.active ?? msg.task ?? null, msg.recent)
     }
   })
 }
@@ -438,6 +458,17 @@ export async function ask(
             if (!msg.name) break
             tools.push(msg.name)
             handlers.onTool(prettyToolName(msg.name))
+            break
+
+          case 'thought':
+            if (msg.text) {
+              onThought?.(msg.text, msg.source ?? 'thought')
+              handlers.onThought?.(msg.text)
+            }
+            break
+
+          case 'task_status':
+            onTaskStatus?.(msg.active ?? msg.task ?? null, msg.recent)
             break
 
           case 'done':

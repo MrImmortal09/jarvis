@@ -210,6 +210,25 @@ function defined<T extends object>(patch: T | undefined): Partial<T> {
  */
 const MAX_ORBITS = 8
 
+export type ThoughtLog = {
+  id: string
+  time: string
+  text: string
+  source: 'thought' | 'tool' | 'cli'
+}
+
+export type TaskInfo = {
+  id: string
+  prompt: string
+  status: 'running' | 'completed' | 'failed'
+  startedAt: number | string
+  completedAt?: number | string
+  tools?: string[]
+  summary?: string
+  result?: string
+  error?: string
+}
+
 type State = {
   phase: Phase
   /** 0..1 mic loudness, drives the reactor pulse. */
@@ -241,6 +260,15 @@ type State = {
   /** JARVIS's control over his own appearance. UI_DEFAULTS == the stock look. */
   ui: UiState
 
+  /** Real-time thoughts and CLI traces from agy / model */
+  activeThought: string | null
+  thoughtLogs: ThoughtLog[]
+  /** Task execution telemetry */
+  activeTask: TaskInfo | null
+  recentTasks: TaskInfo[]
+  /** Whether the holographic CLI telemetry terminal is visible */
+  terminalOpen: boolean
+
   setVoice: (v: string) => void
   setGestures: (on: boolean) => void
   setLooking: (why: string | null) => void
@@ -260,6 +288,13 @@ type State = {
   setConnected: (c: string[]) => void
   pushTurn: (t: Turn) => void
   appendToLastTurn: (text: string) => void
+
+  setActiveThought: (thought: string | null) => void
+  appendThought: (text: string, source?: 'thought' | 'tool' | 'cli') => void
+  clearThoughts: () => void
+  setTaskStatus: (active: TaskInfo | null, recent?: TaskInfo[]) => void
+  setTerminalOpen: (open: boolean) => void
+  toggleTerminal: () => void
 
   applyUi: (patch: UiPatch) => void
   addOrbit: (o: OrbitObject) => void
@@ -287,6 +322,36 @@ export const useStore = create<State>((set) => ({
   expandedBlade: null,
   bootNote: '',
   ui: defaultUi(),
+  activeThought: null,
+  thoughtLogs: [],
+  activeTask: null,
+  recentTasks: [],
+  terminalOpen: false,
+
+  setActiveThought: (activeThought) => set({ activeThought }),
+  appendThought: (text, source = 'thought') =>
+    set((s) => {
+      const now = new Date()
+      const time = now.toTimeString().split(' ')[0]
+      const log: ThoughtLog = {
+        id: `th-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        time,
+        text,
+        source,
+      }
+      return {
+        activeThought: text,
+        thoughtLogs: [...s.thoughtLogs.slice(-120), log],
+      }
+    }),
+  clearThoughts: () => set({ thoughtLogs: [], activeThought: null }),
+  setTaskStatus: (activeTask, recentTasks) =>
+    set((s) => ({
+      activeTask,
+      recentTasks: recentTasks ?? s.recentTasks,
+    })),
+  setTerminalOpen: (terminalOpen) => set({ terminalOpen }),
+  toggleTerminal: () => set((s) => ({ terminalOpen: !s.terminalOpen })),
 
   setVoice: (voice) => set({ voice }),
   setGestures: (gestures) => set({ gestures }),

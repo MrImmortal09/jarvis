@@ -531,7 +531,13 @@ Repository & code change workflow:
   2. Wait for the user's approval before modifying files or committing.
   3. Once approved, execute the edits according to their instructions.
   4. If the user specified whether to commit directly to main or create a pull request, follow their instructions.
-  5. If the user did not specify whether to commit to main or create a pull request, ask: "Shall I push this as a pull request or commit directly to main, sir?"`
+  5. If the user did not specify whether to commit to main or create a pull request, ask: "Shall I push this as a pull request or commit directly to main, sir?"
+
+Task status & background task awareness:
+- When asked about the status of tasks, background jobs, builds, or previous operations (e.g., "what's the status of the tasks?", "did the task finish?", "what did you do while I was away?"):
+  1. Call \`get_task_status\` to inspect in-flight or recently completed background operations.
+  2. If relevant, verify running system processes with Bash (such as ps, git status, git log).
+  3. Give a clear, succinct spoken summary of the task's progress or outcome.`
 
 /**
  * ElevenLabs credentials, borrowed from the MCP server config.
@@ -1157,6 +1163,74 @@ const RESULT_FAILURES = {
   default: 'The turn ended without an answer.',
 }
 
+/**
+ * Global task registry across client connections.
+ * Allows JARVIS to remember in-flight and completed tasks even when the
+ * browser tab is closed or reconnected.
+ */
+const taskRegistry = {
+  active: null,
+  history: [],
+}
+
+function startTask(id, prompt) {
+  const task = {
+    id: id || `t${Date.now().toString(36)}`,
+    prompt: prompt || '',
+    startedAt: Date.now(),
+    status: 'running',
+    tools: [],
+    result: '',
+    error: '',
+  }
+  taskRegistry.active = task
+  return task
+}
+
+function recordTaskTool(name) {
+  if (taskRegistry.active && name && !taskRegistry.active.tools.includes(name)) {
+    taskRegistry.active.tools.push(name)
+  }
+}
+
+function completeTask(id, result, error) {
+  if (!taskRegistry.active) return null
+  const task = taskRegistry.active
+  task.completedAt = Date.now()
+  task.status = error ? 'failed' : 'completed'
+  task.result = result ? String(result).trim() : ''
+  task.error = error ? String(error).trim() : ''
+  taskRegistry.history.unshift({ ...task })
+  if (taskRegistry.history.length > 20) taskRegistry.history.pop()
+  taskRegistry.active = null
+  return task
+}
+
+function getTasksSummary(limit = 5) {
+  return {
+    active: taskRegistry.active
+      ? {
+          id: taskRegistry.active.id,
+          prompt: taskRegistry.active.prompt,
+          status: taskRegistry.active.status,
+          startedAt: new Date(taskRegistry.active.startedAt).toISOString(),
+          elapsedSeconds: Math.round((Date.now() - taskRegistry.active.startedAt) / 1000),
+          tools: taskRegistry.active.tools,
+        }
+      : null,
+    recent: taskRegistry.history.slice(0, limit).map((t) => ({
+      id: t.id,
+      prompt: t.prompt,
+      status: t.status,
+      startedAt: new Date(t.startedAt).toISOString(),
+      completedAt: new Date(t.completedAt).toISOString(),
+      durationSeconds: Math.round((t.completedAt - t.startedAt) / 1000),
+      tools: t.tools,
+      summary: t.result ? t.result.slice(0, 200) : t.error || 'Done',
+    })),
+  }
+}
+
 wss.on('connection', (socket) => {
   console.log('[jarvis] client connected')
 
@@ -1164,6 +1238,15 @@ wss.on('connection', (socket) => {
   // first turn. Refined later by the real init message.
   socket.send(
     JSON.stringify({ type: 'ready', servers: Object.keys(MCP_SERVERS) }),
+  )
+
+  // Send current task status telemetry immediately upon connection
+  socket.send(
+    JSON.stringify({
+      type: 'task_status_init',
+      active: taskRegistry.active,
+      recent: taskRegistry.history.slice(0, 5),
+    }),
   )
 
   /** Resolves the pending user message into the SDK's input generator. */
@@ -1319,6 +1402,7 @@ wss.on('connection', (socket) => {
     // Nor is choosing a model — it is a setting, not work, and the badge would
     // put "jarvis · models" on screen for a lookup that takes no time at all.
     if (name.startsWith('mcp__jarvis_models__')) return
+    recordTaskTool(name)
     if (decideTool(name)) return sendTurn({ type: 'tool', name })
     if (id) heldTools.set(id, name)
   }
@@ -1351,6 +1435,7 @@ wss.on('connection', (socket) => {
         jarvis: displayServer(
           (panel) => send({ type: 'panel', panel }),
           (blade) => send({ type: 'blade', blade }),
+          getTasksSummary,
         ),
         // The interface controls, on the same socket. A separate key because
         // MCP tool names are `mcp__<key>__<tool>` and one key can only carry
@@ -1468,6 +1553,13 @@ wss.on('connection', (socket) => {
         }
 
         switch (msg.type) {
+          case 'thought': {
+            if (msg.text) {
+              sendTurn({ type: 'thought', text: msg.text, source: msg.source ?? 'thought' })
+            }
+            break
+          }
+
           // Raw Anthropic stream events, surfaced by includePartialMessages.
           // This is the ONLY place spoken text arrives: there is no top-level
           // text_delta message in the SDK union and the 'assistant' message
@@ -1483,10 +1575,18 @@ wss.on('connection', (socket) => {
               sendTurn({ type: 'text', delta: ev.delta.text })
             }
             if (
+              ev?.type === 'content_block_delta' &&
+              ev.delta?.type === 'thinking_delta' &&
+              ev.delta.thinking
+            ) {
+              sendTurn({ type: 'thought', text: ev.delta.thinking, source: 'thought' })
+            }
+            if (
               ev?.type === 'content_block_start' &&
               ev.content_block?.type === 'tool_use'
             ) {
               announceTool(ev.content_block.id, ev.content_block.name)
+              sendTurn({ type: 'thought', text: `Tool: ${ev.content_block.name}`, source: 'tool' })
             }
             break
           }
@@ -1523,12 +1623,20 @@ wss.on('connection', (socket) => {
             // nothing to say — the HUD stops spinning and JARVIS stands there
             // silent. Say what happened instead.
             if (msg.subtype === 'success') {
+              completeTask(answering, msg.result ?? '', null)
               sendTurn({
                 type: 'done',
                 text: msg.result ?? '',
                 costUsd: msg.total_cost_usd ?? null,
               })
+              sendTurn({
+                type: 'task_status',
+                active: taskRegistry.active,
+                recent: taskRegistry.history.slice(0, 5),
+              })
             } else {
+              const errStr = (msg.errors ?? []).join(' ') || msg.subtype
+              completeTask(answering, null, errStr)
               console.error(
                 `[jarvis] turn failed: ${msg.subtype}`,
                 msg.errors ?? '',
@@ -1536,6 +1644,11 @@ wss.on('connection', (socket) => {
               sendTurn({
                 type: 'error',
                 message: RESULT_FAILURES[msg.subtype] ?? RESULT_FAILURES.default,
+              })
+              sendTurn({
+                type: 'task_status',
+                active: taskRegistry.active,
+                recent: taskRegistry.history.slice(0, 5),
               })
             }
             // Whatever was waiting on this turn to finish can go now. This is
@@ -1602,6 +1715,12 @@ wss.on('connection', (socket) => {
       void settling.then(() => {
         answering = id
         startTurn()
+        const currentTask = startTask(id, text)
+        sendTurn({
+          type: 'task_status',
+          active: currentTask,
+          recent: taskRegistry.history.slice(0, 5),
+        })
         if (deliver) {
           const resolve = deliver
           deliver = null

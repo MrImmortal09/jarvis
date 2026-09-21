@@ -6,6 +6,7 @@ import { BladeSweep, Blades } from './Blades'
 import { Effects } from './Effects'
 import { Pointer } from './Pointer'
 import { GestureGuide } from './GestureGuide'
+import { ThoughtTerminal } from './ThoughtTerminal'
 
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
@@ -159,6 +160,9 @@ export function Hud() {
   const gestures = useStore((s) => s.gestures)
   const looking = useStore((s) => s.looking)
   const ui = useStore((s) => s.ui)
+  const activeThought = useStore((s) => s.activeThought)
+  const terminalOpen = useStore((s) => s.terminalOpen)
+  const toggleTerminal = useStore((s) => s.toggleTerminal)
 
   // accentFor folds JARVIS's overrides in over the phase colour, so one
   // variable on the root carries a theme change into every .hud-* rule without
@@ -260,6 +264,30 @@ export function Hud() {
         )}
       </AnimatePresence>
 
+      {/* Floating live thought / reasoning banner */}
+      <AnimatePresence>
+        {activeThought && (phase === 'thinking' || phase === 'tooling') && (
+          <motion.div
+            className="thought-badge"
+            onClick={toggleTerminal}
+            title="Click or press T to view telemetry terminal"
+            initial={{ opacity: 0, x: '-50%', y: -6, filter: 'blur(6px)' }}
+            animate={{ opacity: 1, x: '-50%', y: 0, filter: 'blur(0px)' }}
+            exit={{ opacity: 0, x: '-50%', y: -6, filter: 'blur(6px)' }}
+            transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+          >
+            <span className="thought-kicker">
+              <span className="pulse-dot" />
+              THOUGHT
+            </span>
+            <span className="thought-text">{activeThought}</span>
+            <span className="thought-key-hint">
+              <kbd>T</kbd>
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Conversation log — last few turns, fading upward */}
       {ui.chrome.transcript && (
         <div className="log">
@@ -320,7 +348,20 @@ export function Hud() {
             </>
           )}
         </span>
+        <button
+          type="button"
+          className={`hud-terminal-pill ${terminalOpen ? 'active' : ''}`}
+          onClick={toggleTerminal}
+          title="Toggle AGY CLI Telemetry Terminal"
+        >
+          <span className="pill-dot" />
+          <span className="pill-text">AGY TELEMETRY</span>
+          <kbd>T</kbd>
+        </button>
       </footer>
+
+      {/* Holographic Thought & Task Telemetry Terminal */}
+      <ThoughtTerminal />
 
       {/* Last, so a flash or a tear reads as being on the glass rather than
           underneath the chrome. It is pointer-events: none and unmounts the

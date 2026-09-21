@@ -252,6 +252,408 @@ body::after {
   to { transform: rotate(360deg); }
 }
 
+/* Thought Badge (Live reasoning ticker under tool badge) */
+.thought-badge {
+  position: absolute;
+  top: 114px;
+  left: 50%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+  padding: 5px 14px 5px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 7%, rgba(2, 10, 14, 0.7));
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 18%, transparent);
+  cursor: pointer;
+  z-index: 6;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.thought-badge:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, rgba(2, 10, 14, 0.8));
+}
+
+.thought-kicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 8px;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  opacity: 0.75;
+  color: var(--accent);
+  padding-right: 10px;
+  border-right: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: pulse-glow 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-glow {
+  from { opacity: 0.4; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1.15); filter: drop-shadow(0 0 6px var(--accent)); }
+}
+
+.thought-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  max-width: min(50vw, 540px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #e2f7ff;
+  text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.thought-key-hint {
+  opacity: 0.55;
+  margin-left: 4px;
+}
+
+.thought-key-hint kbd {
+  padding: 1px 4px;
+  font-size: 8px;
+}
+
+@media (max-width: 1100px) {
+  .thought-badge { top: 96px; }
+  .thought-text { font-size: 10px; max-width: 55vw; }
+}
+
+/* Holographic AGY CLI & Task Terminal */
+.thought-terminal {
+  position: fixed;
+  bottom: 84px;
+  right: 48px;
+  width: min(620px, 92vw);
+  max-height: min(500px, 62vh);
+  display: flex;
+  flex-direction: column;
+  background: rgba(3, 10, 16, 0.88);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 3px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.75), 0 0 24px color-mix(in srgb, var(--accent) 18%, transparent);
+  z-index: 20;
+  overflow: hidden;
+}
+
+.terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  background: color-mix(in srgb, var(--accent) 9%, rgba(0, 0, 0, 0.6));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.terminal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  font-weight: 500;
+  color: #f0faff;
+}
+
+.terminal-glyph {
+  color: var(--accent);
+  text-shadow: 0 0 8px var(--accent);
+}
+
+.terminal-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  padding: 2px 7px;
+  border-radius: 2px;
+}
+
+.terminal-status-badge.active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: #ffffff;
+}
+
+.terminal-status-badge.idle {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.terminal-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  color: #d6f2ff;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  padding: 3px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.terminal-btn:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.terminal-btn.close-btn {
+  padding: 3px 6px;
+}
+
+/* Tasks telemetry bar */
+.terminal-tasks-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.task-stat-col {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.stat-label {
+  font-size: 8px;
+  letter-spacing: 0.2em;
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+
+.stat-val {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stat-val .highlight {
+  color: #ffffff;
+}
+
+.stat-val .dim {
+  opacity: 0.45;
+}
+
+.stat-tools {
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.status-pill {
+  font-size: 7px;
+  letter-spacing: 0.14em;
+  padding: 1px 5px;
+  border-radius: 2px;
+  margin-left: 6px;
+}
+
+.status-pill.status-completed {
+  background: rgba(50, 205, 50, 0.15);
+  border: 1px solid rgba(50, 205, 50, 0.4);
+  color: #6eff88;
+}
+
+.status-pill.status-failed {
+  background: rgba(255, 60, 60, 0.15);
+  border: 1px solid rgba(255, 60, 60, 0.4);
+  color: #ff7575;
+}
+
+.status-pill.status-running {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border: 1px solid var(--accent);
+  color: #ffffff;
+}
+
+/* Terminal logs body */
+.terminal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(1, 6, 10, 0.6);
+  min-height: 140px;
+}
+
+.terminal-empty {
+  margin: auto;
+  text-align: center;
+  padding: 24px 12px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.terminal-empty .subtext {
+  font-size: 9px;
+  margin-top: 6px;
+  opacity: 0.7;
+}
+
+.terminal-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  word-break: break-word;
+}
+
+.line-time {
+  font-size: 9px;
+  opacity: 0.35;
+  flex-shrink: 0;
+}
+
+.line-tag {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-radius: 1px;
+}
+
+.tag-thought {
+  color: #7de3ff;
+  border: 1px solid rgba(125, 227, 255, 0.3);
+}
+
+.tag-tool {
+  color: #c99aff;
+  border: 1px solid rgba(201, 154, 255, 0.3);
+}
+
+.tag-cli {
+  color: #55ffb0;
+  border: 1px solid rgba(85, 255, 176, 0.3);
+}
+
+.tag-active {
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  animation: pulse-glow 1s infinite alternate;
+}
+
+.line-thought .line-text {
+  color: #c8edff;
+}
+
+.line-tool .line-text {
+  color: #e5ceff;
+}
+
+.line-cli .line-text {
+  color: #d1ffe8;
+}
+
+.line-active {
+  color: #ffffff;
+  text-shadow: 0 0 10px var(--accent);
+}
+
+.cursor-blink {
+  display: inline-block;
+  color: var(--accent);
+  animation: blink 0.9s infinite;
+  margin-left: 3px;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.terminal-footer {
+  padding: 6px 14px;
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  opacity: 0.45;
+  background: rgba(0, 0, 0, 0.4);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* Telemetry pill button in HUD footer */
+.hud-terminal-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 14px;
+  padding: 3px 9px;
+  background: color-mix(in srgb, var(--accent) 10%, rgba(2, 10, 14, 0.6));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 2px;
+  color: #e2f6ff;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: all 0.2s ease;
+  vertical-align: middle;
+}
+
+.hud-terminal-pill:hover,
+.hud-terminal-pill.active {
+  background: color-mix(in srgb, var(--accent) 24%, rgba(2, 10, 14, 0.9));
+  border-color: var(--accent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 40%, transparent);
+  color: #ffffff;
+}
+
+.hud-terminal-pill .pill-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.hud-terminal-pill kbd {
+  font-size: 7px;
+  padding: 0 4px;
+  opacity: 0.8;
+}
+
+@media (max-width: 900px) {
+  .thought-terminal {
+    right: 12px;
+    left: 12px;
+    width: auto;
+    bottom: 70px;
+  }
+}
+
 /* Conversation log */
 
 .log {

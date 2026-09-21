@@ -84,6 +84,20 @@ export function watchCapture(
   if (usingBridge) bridge.watchCapture(fn)
 }
 
+/** Real-time thoughts and CLI traces from agy or Claude */
+export function watchThoughts(
+  fn: (text: string, source: 'thought' | 'tool' | 'cli') => void,
+): void {
+  if (usingBridge) bridge.watchThoughts(fn)
+}
+
+/** Task status telemetry across connections */
+export function watchTaskStatus(
+  fn: (active: any, recent?: any[]) => void,
+): void {
+  if (usingBridge) bridge.watchTaskStatus(fn)
+}
+
 /**
  * Barge-in. Stops the answer on both paths and settles whatever `ask()` call
  * is outstanding, so the caller's await always returns — on the bridge by

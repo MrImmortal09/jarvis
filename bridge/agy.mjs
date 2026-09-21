@@ -300,6 +300,26 @@ export function agyQuery({ prompt, options }) {
       const step = event.step_update
       conversation = step.conversation_id ?? conversation
 
+      if (step.step_type === 'thought') {
+        const thought =
+          step.thought ??
+          step.text_delta ??
+          step.text ??
+          (typeof step.content === 'string' ? step.content : '')
+        if (thought) {
+          emit({ type: 'thought', text: String(thought), source: 'thought' })
+        }
+        return
+      }
+
+      if (step.step_type === 'plan') {
+        const planText = step.plan ? (typeof step.plan === 'string' ? step.plan : JSON.stringify(step.plan)) : ''
+        if (planText) {
+          emit({ type: 'thought', text: `Plan: ${planText}`, source: 'thought' })
+        }
+        return
+      }
+
       if (step.step_type === 'agent_response' && step.text_delta) {
         spoke = true
         emit({
@@ -325,6 +345,7 @@ export function agyQuery({ prompt, options }) {
             type: 'stream_event',
             event: { type: 'content_block_start', content_block: { type: 'tool_use', id: toolId, name } },
           })
+          emit({ type: 'thought', text: `Running tool: ${name}`, source: 'tool' })
         } else if (step.state === 'DONE' || step.state === 'ERROR') {
           // A tool that finished without ever being seen ACTIVE still needs
           // announcing before it can be settled.
@@ -340,6 +361,11 @@ export function agyQuery({ prompt, options }) {
             message: {
               content: [{ type: 'tool_result', tool_use_id: toolId, is_error: step.state === 'ERROR' || Boolean(info.error) }],
             },
+          })
+          emit({
+            type: 'thought',
+            text: step.state === 'ERROR' ? `Tool error: ${name} ${info.error ?? ''}` : `Tool complete: ${name}`,
+            source: 'tool',
           })
         }
       }
@@ -410,12 +436,16 @@ export function agyQuery({ prompt, options }) {
           handle(JSON.parse(line))
         } catch (err) {
           if (debug) console.log('[agy] unparsed:', line.slice(0, 200), err?.message)
+          emit({ type: 'thought', text: line, source: 'cli' })
         }
       }
     })
     child.stderr.on('data', (chunk) => {
       const text = String(chunk).trim()
-      if (text && (debug || /error/i.test(text))) console.log('[agy]', text.slice(0, 300))
+      if (text) {
+        if (debug || /error/i.test(text)) console.log('[agy]', text.slice(0, 300))
+        emit({ type: 'thought', text, source: 'cli' })
+      }
     })
     child.on('exit', (code, signal) => {
       const current = proc === child
