@@ -122,8 +122,8 @@ body::after {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.75); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 /* Side rails */
@@ -297,12 +297,12 @@ body::after {
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 8px var(--accent);
-  animation: pulse-glow 1.2s ease-in-out infinite alternate;
+  flex-shrink: 0;
 }
 
 @keyframes pulse-glow {
-  from { opacity: 0.4; transform: scale(0.85); }
-  to { opacity: 1; transform: scale(1.15); filter: drop-shadow(0 0 6px var(--accent)); }
+  from { opacity: 0.6; }
+  to { opacity: 1; filter: drop-shadow(0 0 6px var(--accent)); }
 }
 
 .thought-text {
@@ -562,7 +562,8 @@ body::after {
 .tag-active {
   color: var(--accent);
   border: 1px solid var(--accent);
-  animation: pulse-glow 1s infinite alternate;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .line-thought .line-text {
