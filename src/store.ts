@@ -214,7 +214,7 @@ export type ThoughtLog = {
   id: string
   time: string
   text: string
-  source: 'thought' | 'tool' | 'cli'
+  source: 'thought' | 'tool' | 'cli' | 'worker'
 }
 
 export type TaskInfo = {
@@ -227,6 +227,19 @@ export type TaskInfo = {
   summary?: string
   result?: string
   error?: string
+}
+
+export type WorkerInfo = {
+  id: string
+  prompt: string
+  status: 'running' | 'queued' | 'completed' | 'failed' | 'cancelled'
+  startedAt?: string
+  completedAt?: string | null
+  elapsedSeconds?: number
+  tools?: string[]
+  result?: string
+  error?: string
+  logTail?: string[]
 }
 
 type State = {
@@ -266,6 +279,9 @@ type State = {
   /** Task execution telemetry */
   activeTask: TaskInfo | null
   recentTasks: TaskInfo[]
+  /** Worker agents */
+  activeWorkers: WorkerInfo[]
+  recentWorkers: WorkerInfo[]
   /** Whether the holographic CLI telemetry terminal is visible */
   terminalOpen: boolean
 
@@ -290,9 +306,10 @@ type State = {
   appendToLastTurn: (text: string) => void
 
   setActiveThought: (thought: string | null) => void
-  appendThought: (text: string, source?: 'thought' | 'tool' | 'cli') => void
+  appendThought: (text: string, source?: 'thought' | 'tool' | 'cli' | 'worker') => void
   clearThoughts: () => void
   setTaskStatus: (active: TaskInfo | null, recent?: TaskInfo[]) => void
+  setWorkerStatus: (active: WorkerInfo[], recent?: WorkerInfo[]) => void
   setTerminalOpen: (open: boolean) => void
   toggleTerminal: () => void
 
@@ -326,6 +343,8 @@ export const useStore = create<State>((set) => ({
   thoughtLogs: [],
   activeTask: null,
   recentTasks: [],
+  activeWorkers: [],
+  recentWorkers: [],
   terminalOpen: false,
 
   setActiveThought: (activeThought) => set({ activeThought }),
@@ -349,6 +368,11 @@ export const useStore = create<State>((set) => ({
     set((s) => ({
       activeTask,
       recentTasks: recentTasks ?? s.recentTasks,
+    })),
+  setWorkerStatus: (activeWorkers, recentWorkers) =>
+    set((s) => ({
+      activeWorkers,
+      recentWorkers: recentWorkers ?? s.recentWorkers,
     })),
   setTerminalOpen: (terminalOpen) => set({ terminalOpen }),
   toggleTerminal: () => set((s) => ({ terminalOpen: !s.terminalOpen })),

@@ -27,6 +27,7 @@ import {
   watchConnection,
   watchThoughts,
   watchTaskStatus,
+  watchWorkerStatus,
   connectedLabels,
   usingBridge,
   type Msg,
@@ -355,6 +356,7 @@ export default function App() {
     watchBlades((blade) => store.getState().pushBlade(blade))
     watchThoughts((text, source) => store.getState().appendThought(text, source))
     watchTaskStatus((active, recent) => store.getState().setTaskStatus(active, recent))
+    watchWorkerStatus((active, recent) => store.getState().setWorkerStatus(active, recent))
 
     /**
      * JARVIS asking to see something.

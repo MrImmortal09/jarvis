@@ -10,6 +10,8 @@ export function ThoughtTerminal() {
   const activeThought = useStore((s) => s.activeThought)
   const activeTask = useStore((s) => s.activeTask)
   const recentTasks = useStore((s) => s.recentTasks)
+  const activeWorkers = useStore((s) => s.activeWorkers)
+  const recentWorkers = useStore((s) => s.recentWorkers)
 
   const bodyRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -40,11 +42,16 @@ export function ThoughtTerminal() {
           <div className="terminal-header">
             <div className="terminal-title">
               <span className="terminal-glyph">◈</span>
-              <span className="terminal-name">AGY CLI TELEMETRY // TASK MONITOR</span>
-              {activeTask ? (
+              <span className="terminal-name">AGY CLI TELEMETRY // MULTI-WORKER POOL</span>
+              {activeWorkers.length > 0 ? (
                 <span className="terminal-status-badge active">
                   <span className="pulse-dot" />
-                  TASK IN FLIGHT
+                  {activeWorkers.length} WORKER{activeWorkers.length === 1 ? '' : 'S'} ACTIVE
+                </span>
+              ) : activeTask ? (
+                <span className="terminal-status-badge active">
+                  <span className="pulse-dot" />
+                  ORCHESTRATOR IN FLIGHT
                 </span>
               ) : (
                 <span className="terminal-status-badge idle">IDLE</span>
@@ -81,30 +88,59 @@ export function ThoughtTerminal() {
 
           {/* Task status telemetry summary */}
           <div className="terminal-tasks-bar">
-            <div className="task-stat-col">
-              <span className="stat-label">ACTIVE TASK:</span>
-              <span className="stat-val">
-                {activeTask ? (
-                  <>
-                    <span className="highlight">"{activeTask.prompt}"</span>
-                    {activeTask.tools && activeTask.tools.length > 0 && (
-                      <span className="stat-tools"> [{activeTask.tools.join(', ')}]</span>
+            {activeWorkers.length > 0 ? (
+              activeWorkers.map((w) => (
+                <div key={w.id} className="task-stat-col worker-row">
+                  <span className="stat-label">W[{w.id}]:</span>
+                  <span className="stat-val">
+                    <span className="highlight">"{w.prompt.slice(0, 80)}{w.prompt.length > 80 ? '...' : ''}"</span>
+                    {w.tools && w.tools.length > 0 && (
+                      <span className="stat-tools"> [{w.tools.join(', ')}]</span>
                     )}
-                  </>
-                ) : (
-                  <span className="dim">None running</span>
-                )}
-              </span>
-            </div>
+                    {w.elapsedSeconds !== undefined && (
+                      <span className="stat-time"> ({w.elapsedSeconds}s)</span>
+                    )}
+                  </span>
+                </div>
+              ))
+            ) : activeTask ? (
+              <div className="task-stat-col">
+                <span className="stat-label">ACTIVE TASK:</span>
+                <span className="stat-val">
+                  <span className="highlight">"{activeTask.prompt}"</span>
+                  {activeTask.tools && activeTask.tools.length > 0 && (
+                    <span className="stat-tools"> [{activeTask.tools.join(', ')}]</span>
+                  )}
+                </span>
+              </div>
+            ) : (
+              <div className="task-stat-col">
+                <span className="stat-label">WORKER POOL:</span>
+                <span className="stat-val">
+                  <span className="dim">0 active tasks</span>
+                </span>
+              </div>
+            )}
 
-            {recentTasks && recentTasks.length > 0 && (
+            {(recentWorkers.length > 0 || recentTasks.length > 0) && (
               <div className="task-stat-col recent-col">
                 <span className="stat-label">LAST COMPLETED:</span>
                 <span className="stat-val">
-                  <span className="recent-prompt">"{recentTasks[0].prompt}"</span>
-                  <span className={`status-pill status-${recentTasks[0].status}`}>
-                    {recentTasks[0].status.toUpperCase()}
-                  </span>
+                  {recentWorkers.length > 0 ? (
+                    <>
+                      <span className="recent-prompt">"{recentWorkers[0].prompt.slice(0, 60)}{recentWorkers[0].prompt.length > 60 ? '...' : ''}"</span>
+                      <span className={`status-pill status-${recentWorkers[0].status}`}>
+                        {recentWorkers[0].status.toUpperCase()}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="recent-prompt">"{recentTasks[0].prompt.slice(0, 60)}{recentTasks[0].prompt.length > 60 ? '...' : ''}"</span>
+                      <span className={`status-pill status-${recentTasks[0].status}`}>
+                        {recentTasks[0].status.toUpperCase()}
+                      </span>
+                    </>
+                  )}
                 </span>
               </div>
             )}

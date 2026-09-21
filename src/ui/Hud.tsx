@@ -162,6 +162,7 @@ export function Hud() {
   const ui = useStore((s) => s.ui)
   const activeThought = useStore((s) => s.activeThought)
   const terminalOpen = useStore((s) => s.terminalOpen)
+  const activeWorkers = useStore((s) => s.activeWorkers)
   const toggleTerminal = useStore((s) => s.toggleTerminal)
 
   // accentFor folds JARVIS's overrides in over the phase colour, so one
@@ -207,6 +208,7 @@ export function Hud() {
                 note that never got cleared (a stuck 'voice 97%') sits over
                 LISTENING and PROCESSING for the rest of the session. */}
             {phase === 'boot' && bootNote ? bootNote : statusText[phase]}
+            {activeWorkers.length > 0 && phase !== 'boot' && phase !== 'offline' ? ` · ${activeWorkers.length} TASK${activeWorkers.length === 1 ? '' : 'S'}` : ''}
           </span>
         </div>
       </header>

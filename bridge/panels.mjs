@@ -317,7 +317,7 @@ argument. You know those things. Overrule it whenever you have reason to.`
  * @param {(panel: object) => void} emit - pushes the panel to the browser
  * @param {(blade: object) => void} emitBlade - pushes a blade to the browser
  */
-export function displayServer(emit, emitBlade, getTaskStatus) {
+export function displayServer(emit, emitBlade, getTaskStatus, workerPool) {
   return createSdkMcpServer({
     name: 'jarvis',
     version: '1.0.0',
@@ -425,13 +425,103 @@ export function displayServer(emit, emitBlade, getTaskStatus) {
 
       tool(
         'get_task_status',
-        'Check the status of current and recent background tasks, system operations, commands, or jobs that were initiated by the user (including tasks that ran in the background after the user disconnected).',
+        'Check the status of current and recent background tasks, system operations, commands, or jobs that were initiated by the user (including tasks that ran in the background after the user disconnected). Also shows worker agents.',
         {
           limit: z.number().optional().describe('Maximum number of recent tasks to return (default: 5)'),
         },
         async (args) => {
-          const status = getTaskStatus ? await getTaskStatus(args.limit) : { active: null, recent: [] }
-          return { content: [{ type: 'text', text: JSON.stringify(status, null, 2) }] }
+          const tasks = getTaskStatus ? await getTaskStatus(args.limit) : { active: null, recent: [] }
+          const workers = workerPool ? workerPool.summary() : { activeCount: 0, active: [], recent: [] }
+          return { content: [{ type: 'text', text: JSON.stringify({ tasks, workers }, null, 2) }] }
+        },
+      ),
+
+      // ---- Worker management tools ----
+
+      tool(
+        'spawn_worker',
+        'Delegate a task to an independent worker agent that runs in parallel. ' +
+        'Use this for ANY task that involves running commands, editing files, creating PRs, ' +
+        'cloning repos, or any work that takes more than a few seconds. ' +
+        'Returns immediately with a worker ID — the worker runs in the background. ' +
+        'You stay free for conversation while workers execute. ' +
+        'Check on workers with list_workers or worker_status.',
+        {
+          task: z.string().describe(
+            'The full task description for the worker. Be specific and detailed — ' +
+            'the worker has no conversation context, only this prompt. Include repo URLs, ' +
+            'branch names, file paths, and exact instructions.'
+          ),
+        },
+        async (args) => {
+          if (!workerPool) {
+            return { isError: true, content: [{ type: 'text', text: 'Worker pool is not available.' }] }
+          }
+          const result = workerPool.spawn(String(args.task))
+          return {
+            content: [{
+              type: 'text',
+              text: `Worker ${result.id} ${result.status}. Task: "${String(args.task).slice(0, 100)}"`,
+            }],
+          }
+        },
+      ),
+
+      tool(
+        'list_workers',
+        'List all active, queued, and recently completed worker agents with their status, prompt, elapsed time, and tools used.',
+        {
+          limit: z.number().optional().describe('Max recent workers to return (default: 10)'),
+        },
+        async (args) => {
+          if (!workerPool) {
+            return { content: [{ type: 'text', text: JSON.stringify({ active: [], queued: [], recent: [] }) }] }
+          }
+          const list = workerPool.list(args.limit ?? 10)
+          return { content: [{ type: 'text', text: JSON.stringify(list, null, 2) }] }
+        },
+      ),
+
+      tool(
+        'worker_status',
+        'Get detailed status of a specific worker by ID, including log tail, result, tools used, and errors.',
+        {
+          worker_id: z.string().describe('The worker ID returned by spawn_worker.'),
+        },
+        async (args) => {
+          if (!workerPool) {
+            return { isError: true, content: [{ type: 'text', text: 'Worker pool is not available.' }] }
+          }
+          const info = workerPool.status(String(args.worker_id))
+          if (!info) {
+            return { isError: true, content: [{ type: 'text', text: `No worker found with ID ${args.worker_id}` }] }
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }] }
+        },
+      ),
+
+      tool(
+        'kill_worker',
+        'Cancel a running or queued worker. Use "all" as the ID to cancel all workers.',
+        {
+          worker_id: z.string().describe('The worker ID to cancel, or "all" to cancel everything.'),
+        },
+        async (args) => {
+          if (!workerPool) {
+            return { isError: true, content: [{ type: 'text', text: 'Worker pool is not available.' }] }
+          }
+          const id = String(args.worker_id)
+          if (id === 'all') {
+            workerPool.killAll()
+            return { content: [{ type: 'text', text: 'All workers cancelled.' }] }
+          }
+          const killed = workerPool.kill(id)
+          return {
+            content: [{
+              type: 'text',
+              text: killed ? `Worker ${id} cancelled.` : `No running worker with ID ${id}.`,
+            }],
+          }
         },
       ),
     ],

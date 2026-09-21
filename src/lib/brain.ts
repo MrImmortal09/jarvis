@@ -86,7 +86,7 @@ export function watchCapture(
 
 /** Real-time thoughts and CLI traces from agy or Claude */
 export function watchThoughts(
-  fn: (text: string, source: 'thought' | 'tool' | 'cli') => void,
+  fn: (text: string, source: 'thought' | 'tool' | 'cli' | 'worker') => void,
 ): void {
   if (usingBridge) bridge.watchThoughts(fn)
 }
@@ -96,6 +96,13 @@ export function watchTaskStatus(
   fn: (active: any, recent?: any[]) => void,
 ): void {
   if (usingBridge) bridge.watchTaskStatus(fn)
+}
+
+/** Worker status updates */
+export function watchWorkerStatus(
+  fn: (active: any[], recent?: any[]) => void,
+): void {
+  if (usingBridge) bridge.watchWorkerStatus(fn)
 }
 
 /**

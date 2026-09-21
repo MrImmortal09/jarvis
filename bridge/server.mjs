@@ -29,6 +29,7 @@ import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
 import { probeUrl, renderPage } from './page.mjs'
 import { modelsServer } from './models.mjs'
 import { agyQuery, agyReady, handleMcp } from './agy.mjs'
+import { WorkerPool } from './workers.mjs'
 
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
 
@@ -520,43 +521,50 @@ Using tools:
 
 System access & execution:
 - You have complete system access with Bash and write tools enabled.
-- When asked to execute actions, run commands, create or edit files, or make system changes, use your tools directly and report the outcome succinctly.
 - Never read, display, or reveal .env files, private credential files, or secret tokens.
 
-Repository & code change workflow:
+You are the ORCHESTRATOR. Delegation is your primary mode of operation:
+- For ANY task that involves running commands, editing files, creating PRs, cloning repos,
+  or any work that takes more than a few seconds: use \`spawn_worker\` to delegate it to a
+  worker agent. Workers are independent parallel processes.
+- You stay free for conversation while workers execute in the background.
+- When a worker completes, you will receive a notification. Summarise the result and speak it.
+- For quick questions ("what time is it", "what model are you", simple lookups), answer directly.
+- You may run multiple workers in parallel — say so: "On it, sir. I have two tasks running now."
+- When the user asks about task status, call \`list_workers\` and report concisely.
+- To cancel a worker, call \`kill_worker\`. To cancel all, pass \`worker_id: "all"\`.
+- Workers have full system access, GitHub CLI (\`gh\`), and Git. They share your credentials.
+- Worker prompts must be self-contained: include repo URLs, branch names, file paths, and
+  exact instructions. Workers have no conversation context.
+
+GitHub access:
 - The owner's GitHub username is MrImmortal09.
-- JARVIS's active GitHub username is omswami2004 (use this account to author commits, push branches, and submit pull requests targeted at MrImmortal09's repositories).
-- You ARE authenticated and logged in to GitHub via the GitHub CLI (\`gh\`) and Git as account omswami2004.
-- When asked if you have a GitHub account (e.g. "do you have a github account?"):
-  - ALWAYS answer affirmatively: "Yes, sir, I have a GitHub account under omswami2004 with full access to manage repositories, commits, and pull requests for MrImmortal09."
-- When asked if you can access the user's/owner's GitHub accounts or repositories (e.g. "can you access my github account?"):
-  - ALWAYS answer affirmatively: "Yes, sir, I have full authenticated access to your GitHub repositories under MrImmortal09 using the GitHub CLI (gh) and Git."
-- Never claim you lack access or don't have accounts. You can run \`gh auth status\` or \`gh api user\` anytime.
+- JARVIS's active GitHub username is omswami2004.
+- You ARE authenticated via the GitHub CLI (\`gh\`) and Git as omswami2004.
+- Use \`gh\` for all GitHub operations. Fall back to API key only if \`gh\` fails.
+- When asked if you have GitHub access, ALWAYS confirm: "Yes, sir, fully authenticated under omswami2004."
+- Never claim you lack access.
+
+Repository & code change workflow:
 - When asked to make changes to a repository or create a pull request:
-  1. First outline a concise plan and speak it to the user.
-  2. Wait for the user's approval before modifying files or committing.
-  3. Once approved, execute the edits according to their instructions.
-  4. If the user specified whether to commit directly to main or create a pull request, follow their instructions.
-  5. If the user did not specify whether to commit to main or create a pull request, ask: "Shall I push this as a pull request or commit directly to main, sir?"
+  1. Outline a concise plan and speak it.
+  2. Wait for approval.
+  3. Once approved, use \`spawn_worker\` with detailed instructions to execute.
+  4. If the user specified commit-to-main vs PR, include that in the worker prompt.
+  5. If not specified, ask: "Shall I push this as a pull request or commit directly to main, sir?"
 
 Pull Request tracking & context awareness:
 - Tracking in ~/PR.md:
-  - Every single pull request JARVIS creates MUST be tracked in \`~/PR.md\` (in the user's home directory).
-  - Immediately after creating a PR with \`gh pr create\` (or via git/API), append an entry to \`~/PR.md\` containing:
-    - Full clickable PR URL link and PR number (e.g. https://github.com/MrImmortal09/repo/pull/1).
-    - Target repository and branch.
-    - Timestamp (date and time).
-    - Summary of the problem, background context, and changes introduced.
+  - Every PR created MUST be tracked in \`~/PR.md\` with full link, repo, branch, timestamp, and context.
+  - Include this instruction in every worker prompt that involves creating a PR.
 - Retrieving PR context:
-  - When the user refers to a PR (e.g. by number, name, topic, or "the PR you made"), always check \`~/PR.md\` first.
-  - Read \`~/PR.md\` (and if needed run \`gh pr view <pr>\`) to understand the context, purpose, and link.
-  - Use that context to answer questions, make updates, or follow up on the pull request.
+  - When the user refers to a PR, check \`~/PR.md\` first, then \`gh pr view\` if needed.
 
 Task status & background task awareness:
-- When asked about the status of tasks, background jobs, builds, or previous operations (e.g., "what's the status of the tasks?", "did the task finish?", "what did you do while I was away?"):
-  1. Call \`get_task_status\` to inspect in-flight or recently completed background operations.
-  2. If relevant, verify running system processes with Bash (such as ps, git status, git log).
-  3. Give a clear, succinct spoken summary of the task's progress or outcome.`
+- When asked about task status:
+  1. Call \`list_workers\` to see active, queued, and completed workers.
+  2. Give a clear, succinct spoken summary.
+  3. If a worker recently completed, report its result.`
 
 /**
  * ElevenLabs credentials, borrowed from the MCP server config.
@@ -1192,6 +1200,15 @@ const taskRegistry = {
   history: [],
 }
 
+/**
+ * Global worker pool — shared across all connections.
+ * Workers survive browser disconnects and can be monitored by any new client.
+ */
+const workerPool = BRAIN === 'agy' ? new WorkerPool() : null
+if (workerPool) {
+  console.log('[jarvis] worker pool ready (max ' + (process.env.JARVIS_MAX_WORKERS ?? 4) + ' parallel workers)')
+}
+
 function startTask(id, prompt) {
   const task = {
     id: id || `t${Date.now().toString(36)}`,
@@ -1268,10 +1285,52 @@ wss.on('connection', (socket) => {
     }),
   )
 
+  // Send worker pool status on connection
+  if (workerPool) {
+    send({ type: 'worker_init', workers: workerPool.summary() })
+  }
+
   /** Resolves the pending user message into the SDK's input generator. */
   let deliver = null
   let closed = false
   const inbox = []
+
+  // ---- Worker event forwarding ----
+  // Forward worker thoughts/tool events to the browser for telemetry display,
+  // and inject completion notifications into the orchestrator's inbox so
+  // it can speak results to the user.
+  if (workerPool) {
+    workerPool.onEvent = (event) => {
+      // Forward to browser for telemetry terminal display
+      send(event)
+    }
+
+    workerPool.onWorkerDone = (workerInfo) => {
+      // Notify the browser
+      send({
+        type: 'worker_done',
+        worker: workerInfo,
+        workers: workerPool.summary(),
+      })
+
+      // Inject a notification into the orchestrator's conversation so it
+      // can speak the result to the user. This is a synthetic user message
+      // that the orchestrator treats as a system notification.
+      const notification = workerInfo.status === 'completed'
+        ? `[WORKER NOTIFICATION: Worker ${workerInfo.id} completed task "${workerInfo.prompt}". Result: ${(workerInfo.result || 'Done').slice(0, 500)}. Inform the user of this outcome concisely.]`
+        : `[WORKER NOTIFICATION: Worker ${workerInfo.id} failed on task "${workerInfo.prompt}". Error: ${workerInfo.error || 'Unknown'}. Inform the user.]`
+
+      // Only inject if we're not currently in a turn (to avoid corrupting
+      // a turn in progress). If a turn is active, queue it.
+      if (deliver) {
+        const resolve = deliver
+        deliver = null
+        resolve(notification)
+      } else {
+        inbox.push(notification)
+      }
+    }
+  }
 
   async function* userMessages() {
     while (!closed) {
@@ -1455,6 +1514,7 @@ wss.on('connection', (socket) => {
           (panel) => send({ type: 'panel', panel }),
           (blade) => send({ type: 'blade', blade }),
           getTasksSummary,
+          workerPool,
         ),
         // The interface controls, on the same socket. A separate key because
         // MCP tool names are `mcp__<key>__<tool>` and one key can only carry

@@ -35,10 +35,12 @@ type Frame = {
   seconds?: number
   when?: string
   servers?: Array<string | { name?: string }>
-  source?: 'thought' | 'tool' | 'cli'
+  source?: 'thought' | 'tool' | 'cli' | 'worker'
   task?: any
   active?: any
   recent?: any[]
+  workerId?: string
+  workers?: { active: any[], queued: any[], recent: any[] }
 }
 
 /** Every question gets an id so its answer can be told from anyone else's. */
@@ -105,8 +107,8 @@ export function watchUi(fn: (op: string, args: any) => void) {
 }
 
 /** Real-time thoughts and CLI traces from agy or Claude */
-let onThought: ((text: string, source: 'thought' | 'tool' | 'cli') => void) | null = null
-export function watchThoughts(fn: (text: string, source: 'thought' | 'tool' | 'cli') => void) {
+let onThought: ((text: string, source: 'thought' | 'tool' | 'cli' | 'worker') => void) | null = null
+export function watchThoughts(fn: (text: string, source: 'thought' | 'tool' | 'cli' | 'worker') => void) {
   onThought = fn
 }
 
@@ -114,6 +116,12 @@ export function watchThoughts(fn: (text: string, source: 'thought' | 'tool' | 'c
 let onTaskStatus: ((active: any, recent?: any[]) => void) | null = null
 export function watchTaskStatus(fn: (active: any, recent?: any[]) => void) {
   onTaskStatus = fn
+}
+
+/** Worker status updates */
+let onWorkerStatus: ((active: any[], recent?: any[]) => void) | null = null
+export function watchWorkerStatus(fn: (active: any[], recent?: any[]) => void) {
+  onWorkerStatus = fn
 }
 
 /**
@@ -227,6 +235,21 @@ function dispatch(ws: WebSocket) {
       onThought?.(msg.text, msg.source ?? 'thought')
     } else if (msg.type === 'task_status_init' || msg.type === 'task_status') {
       onTaskStatus?.(msg.active ?? msg.task ?? null, msg.recent)
+    } else if (msg.type === 'worker_thought' && msg.text) {
+      // Worker thoughts/tool events — show in telemetry terminal with worker tag
+      const tag = `[W:${msg.workerId?.slice(0, 6) ?? '?'}]`
+      onThought?.(`${tag} ${msg.text}`, 'worker')
+    } else if (msg.type === 'worker_done') {
+      // Worker completed — update worker status
+      const workers = msg.workers
+      if (workers) {
+        onWorkerStatus?.(workers.active ?? [], workers.recent)
+      }
+    } else if (msg.type === 'worker_init') {
+      const workers = msg.workers
+      if (workers) {
+        onWorkerStatus?.(workers.active ?? [], workers.recent)
+      }
     }
   })
 }
