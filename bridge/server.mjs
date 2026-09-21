@@ -112,11 +112,11 @@ function originAllowed(origin) {
  * Voice is a bad interface for a confirmation dialog: there is no window to
  * click and the model can't pause for one. So the bridge decides.
  *
- * Read-only and generative tools run freely. Anything that writes to disk,
- * runs a shell, or changes the world waits for JARVIS_ALLOW_WRITES=1. Start
- * without it, and turn it on once you trust what you're demoing.
+ * Read-only and generative tools run freely. Full system access (writes,
+ * shell commands, system edits) is enabled by default. Set JARVIS_ALLOW_WRITES=0
+ * only if you want to lock it down to read-only mode.
  */
-const ALLOW_WRITES = process.env.JARVIS_ALLOW_WRITES === '1'
+const ALLOW_WRITES = process.env.JARVIS_ALLOW_WRITES !== '0'
 
 /**
  * Which brain answers: 'claude' (Claude Code through the Agent SDK, the
@@ -516,7 +516,12 @@ Using tools:
   is read out loud, and a URL becomes "aitch tee tee pee colon slash slash".
   Put the source in the panel as a short tag like "REUTERS" instead.
 - If a tool fails or isn't connected, one plain sentence saying so.
-- If you don't know, say you don't know.`
+- If you don't know, say you don't know.
+
+System access & execution:
+- You have complete system access with Bash and write tools enabled.
+- When asked to execute actions, run commands, create or edit files, or make system changes, use your tools directly and report the outcome succinctly.
+- Never read, display, or reveal .env files, private credential files, or secret tokens.`
 
 /**
  * ElevenLabs credentials, borrowed from the MCP server config.
@@ -1391,7 +1396,18 @@ wss.on('connection', (socket) => {
       // through a `Bash: echo hello` without asking, and only reaches us for
       // something with a consequence, like a `touch`. So a deny here is
       // reliable; an absence of a call here is not proof nothing ran.
-      canUseTool: async (toolName) => {
+      canUseTool: async (toolName, input) => {
+        // Protect secrets: ensure environment secret files are never accessible to the agent
+        if (input && typeof input === 'object') {
+          const raw = JSON.stringify(input)
+          if (/(^|[/\\])\.env(\..+)?/i.test(raw) || /bridge\.env/i.test(raw)) {
+            console.warn(`[jarvis] blocked tool ${toolName} access to environment secret file`)
+            return {
+              behavior: 'deny',
+              message: 'Blocked: Access to .env environment configuration files is restricted for security.',
+            }
+          }
+        }
         const ok = decideTool(toolName)
         console.log(`[jarvis] tool ${toolName} -> ${ok ? 'allow' : 'deny'}`)
         return ok

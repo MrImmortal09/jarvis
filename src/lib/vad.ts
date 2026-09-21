@@ -75,7 +75,8 @@ const START_MS = 110
  * should always have been — a cheap "have they stopped making noise" — and the
  * shorter window gets the transcript moving sooner.
  */
-const SILENCE_MS = 650
+const parsedSilence = Number(import.meta.env.VITE_VAD_SILENCE_MS)
+const SILENCE_MS = Number.isFinite(parsedSilence) && parsedSilence > 0 ? parsedSilence : 1500
 /** Nobody speaks one segment for this long; cut it and transcribe what we have. */
 const MAX_MS = 20000
 

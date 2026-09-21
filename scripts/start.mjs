@@ -44,7 +44,7 @@ function vendorWasm() {
   }
 }
 
-const writes = process.argv.includes('--writes')
+const writes = process.env.JARVIS_ALLOW_WRITES !== '0'
 
 // A dim label per process, so the interleaved logs stay readable.
 const paint = (tag, colour) => (line) =>

@@ -152,15 +152,18 @@ const SELF_GUARD_MS = 350
  * more clause. Making it generous here is what would make every ordinary
  * question feel slow.
  */
-const SETTLE_MS = 250
+const parsedSettle = Number(import.meta.env.VITE_VOICE_SETTLE_MS)
+const SETTLE_MS = Number.isFinite(parsedSettle) && parsedSettle > 0 ? parsedSettle : 1200
 /** ...and this long when the sentence is plainly unfinished. */
-const CONTINUE_MS = 1600
+const parsedContinue = Number(import.meta.env.VITE_VOICE_CONTINUE_MS)
+const CONTINUE_MS = Number.isFinite(parsedContinue) && parsedContinue > 0 ? parsedContinue : 3000
 /**
  * Nothing is held longer than this in total. A ceiling rather than a timer:
  * without it, someone who ends every clause on "and" could hold a turn open
  * for ever, and the assistant would look like it had stopped listening.
  */
-const MAX_HOLD_MS = 6000
+const parsedMaxHold = Number(import.meta.env.VITE_VOICE_MAX_HOLD_MS)
+const MAX_HOLD_MS = Number.isFinite(parsedMaxHold) && parsedMaxHold > 0 ? parsedMaxHold : 15000
 
 /**
  * How long to keep waiting, given what has been said so far.
