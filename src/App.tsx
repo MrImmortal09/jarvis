@@ -283,8 +283,6 @@ export default function App() {
   }
 
   const onUtterance = (text: string) => {
-    const p = store.getState().phase
-    if (p !== 'listening' && !spaceHeld.current) return
     const said = text.replace(LEADING_NAME, '').trim()
     if (!said || /^[\s.…]+$/.test(said)) return
     heldTranscript.current = heldTranscript.current
@@ -294,8 +292,6 @@ export default function App() {
   }
 
   const onPartial = (text: string) => {
-    const p = store.getState().phase
-    if (p !== 'listening' && !spaceHeld.current) return
     const clean = text.replace(LEADING_NAME, '').trim()
     if (!clean || /^[\s.…]+$/.test(clean)) {
       if (clean) store.getState().setCaption(clean)
@@ -697,6 +693,7 @@ export default function App() {
         store.getState().setCaption('')
         store.getState().setPhase('listening')
         sfx.play('listen')
+        voice.current?.startCapture?.()
       }
     }
 
@@ -709,19 +706,19 @@ export default function App() {
       e.preventDefault()
       spaceHeld.current = false
 
-      const flushed = await voice.current?.flush?.()
+      store.getState().setPhase('thinking')
 
-      setTimeout(() => {
-        const raw = (flushed || heldTranscript.current || store.getState().caption || '').trim()
-        const said = raw.replace(LEADING_NAME, '').trim()
-        heldTranscript.current = ''
-        if (said && !/^[\s.…]+$/.test(said)) {
-          store.getState().setCaption('')
-          void respond(said)
-        } else {
-          goDormant()
-        }
-      }, 150)
+      const flushed = await voice.current?.flush?.()
+      const raw = (flushed || heldTranscript.current || store.getState().caption || '').trim()
+      const said = raw.replace(LEADING_NAME, '').trim()
+      heldTranscript.current = ''
+
+      if (said && !/^[\s.…]+$/.test(said)) {
+        store.getState().setCaption('')
+        void respond(said)
+      } else {
+        goDormant()
+      }
     }
 
     const onBlur = () => {

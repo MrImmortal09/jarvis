@@ -55,6 +55,8 @@ export type Voice = {
   stop: () => void
   /** True while a recogniser is actually running. */
   live: () => boolean
+  /** Start manual capture (push-to-talk). */
+  startCapture?: () => void
   /** Flush and fire any currently buffered transcript immediately. */
   flush?: () => Promise<string | void> | string | void
 }
@@ -451,8 +453,8 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
    * now, not the one they interrupted.
    */
   const transcribe = async (blob: Blob) => {
+    if (!blob || blob.size < 400) return
     const mode = h.mode()
-    if (mode === 'deaf') return
     const t0 = performance.now()
     try {
       const res = await fetch(`${BRIDGE_HTTP_URL}/stt`, {
@@ -499,8 +501,8 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
         return
       }
 
-      // Not a turn yet — a piece of one. The assembler decides when the thought
-      // is finished, reading the words and whether the room is still noisy.
+      // Deliver text to the app and assembler
+      h.onUtterance(said)
       assemble.feed(said, vad?.meter().speaking ?? false)
     } catch (err) {
       diag.restarts++
@@ -576,7 +578,7 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
     // to the wake word. Anything half-said belonged to a conversation that is
     // over, and letting the hold expire later would open the next one with a
     // fragment of the last.
-    if ((mode === 'wake' || mode === 'deaf') && assemble.held()) assemble.cancel()
+    if (mode === 'wake' && assemble.held()) assemble.cancel()
   }, 200)
 
   return {
@@ -586,12 +588,15 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
       vad?.stop()
       diag.running = false
     },
+    startCapture: () => {
+      vad?.startCapture?.()
+    },
     flush: async () => {
-      vad?.flush?.()
+      const blob = await vad?.flush?.()
       let waited = 0
-      while ((draining || pendingAudio.length) && waited < 4000) {
-        await new Promise((r) => setTimeout(r, 60))
-        waited += 60
+      while ((draining || pendingAudio.length || (blob && !assemble.held())) && waited < 6000) {
+        await new Promise((r) => setTimeout(r, 50))
+        waited += 50
       }
       const before = assemble.held()
       assemble.flush()
@@ -843,6 +848,10 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       }
     },
     live: () => running,
+    startCapture: () => {
+      settled = ''
+      interim = ''
+    },
     flush: async () => {
       const text = `${settled} ${interim}`.replace(/\s+/g, ' ').trim()
       clearSilence()

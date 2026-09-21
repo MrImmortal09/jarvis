@@ -46,8 +46,10 @@ export type Vad = {
   live: () => boolean
   /** Live internals, for the diagnostics panel. */
   meter: () => { energy: number; floor: number; threshold: number; speaking: boolean }
-  /** Flush any active speech segment immediately. */
-  flush?: () => void
+  /** Start manual capture (e.g. hold-to-talk). */
+  startCapture?: () => void
+  /** Flush and return any active speech segment immediately. */
+  flush?: () => Promise<Blob | null>
 }
 
 // ---------------------------------------------------------------------------
@@ -179,28 +181,50 @@ export async function startVad(h: VadHandlers): Promise<Vad> {
     parts = []
   }
 
-  const endSegment = () => {
+  let manualCapture = false
+
+  const startCapture = () => {
+    manualCapture = true
+    speaking = true
+    armedAt = performance.now()
+    speechStartedAt = performance.now()
+    lastLoud = performance.now()
+    if (!recorder || recorder.state === 'inactive') {
+      startRecorder()
+    }
+  }
+
+  const endSegment = (): Promise<Blob | null> => {
+    manualCapture = false
     const rec = recorder
     const startedAt = speechStartedAt
     speaking = false
     speechStartedAt = 0
-    if (!rec) return
+    armedAt = 0
+    if (!rec) return Promise.resolve(null)
     recorder = null
 
-    const finalise = () => {
-      const type = rec.mimeType || mime || 'audio/webm'
-      const blob = new Blob(parts, { type })
-      parts = []
-      const ms = startedAt ? performance.now() - startedAt : 0
-      h.onEnd(blob, ms)
-    }
-    rec.onstop = finalise
-    try {
-      if (rec.state !== 'inactive') rec.stop()
-      else finalise()
-    } catch {
-      finalise()
-    }
+    return new Promise((resolve) => {
+      const finalise = () => {
+        const type = rec.mimeType || mime || 'audio/webm'
+        const blob = new Blob(parts, { type })
+        parts = []
+        const ms = startedAt ? performance.now() - startedAt : 0
+        if (blob.size > 0) {
+          h.onEnd(blob, ms)
+          resolve(blob)
+        } else {
+          resolve(null)
+        }
+      }
+      rec.onstop = finalise
+      try {
+        if (rec.state !== 'inactive') rec.stop()
+        else finalise()
+      } catch {
+        finalise()
+      }
+    })
   }
 
   const tick = () => {
@@ -210,6 +234,11 @@ export async function startVad(h: VadHandlers): Promise<Vad> {
     const energy = rms()
     smoothEnergy += (energy - smoothEnergy) * 0.5
     h.onLevel(Math.min(1, smoothEnergy * 12))
+
+    if (manualCapture) {
+      // While manual hold-to-talk capture is active, keep recording continuously
+      return
+    }
 
     // Adapt the floor only when we are confident this is not speech.
     if (!speaking && armedAt === 0) {
@@ -248,7 +277,7 @@ export async function startVad(h: VadHandlers): Promise<Vad> {
       const runFor = now - speechStartedAt
       if (quietFor >= SILENCE_MS || runFor >= MAX_MS) {
         armedAt = 0
-        endSegment()
+        void endSegment()
       }
     }
   }
@@ -257,6 +286,7 @@ export async function startVad(h: VadHandlers): Promise<Vad> {
 
   return {
     stop: () => {
+      manualCapture = false
       stopped = true
       cancelAnimationFrame(raf)
       discardRecorder()
@@ -272,6 +302,7 @@ export async function startVad(h: VadHandlers): Promise<Vad> {
     },
     live: () => !stopped,
     meter: () => ({ energy: smoothEnergy, floor, threshold, speaking }),
+    startCapture,
     flush: endSegment,
   }
 }
