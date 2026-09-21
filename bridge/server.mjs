@@ -1400,11 +1400,16 @@ wss.on('connection', (socket) => {
         // Protect secrets: ensure environment secret files are never accessible to the agent
         if (input && typeof input === 'object') {
           const raw = JSON.stringify(input)
-          if (/(^|[/\\])\.env(\..+)?/i.test(raw) || /bridge\.env/i.test(raw)) {
+          if (
+            /(^|[^a-zA-Z0-9_-])\.env(\b|[._-])/i.test(raw) ||
+            /bridge\.env/i.test(raw) ||
+            /\b(printenv|export\s+-p)\b/i.test(raw) ||
+            /\b(GITHUB_TOKEN|ANTHROPIC_AUTH_TOKEN|ELEVENLABS_API_KEY)\b/i.test(raw)
+          ) {
             console.warn(`[jarvis] blocked tool ${toolName} access to environment secret file`)
             return {
               behavior: 'deny',
-              message: 'Blocked: Access to .env environment configuration files is restricted for security.',
+              message: 'Blocked: Access to .env environment configuration files and secrets is restricted for security.',
             }
           }
         }
