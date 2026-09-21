@@ -1272,9 +1272,28 @@ wss.on('connection', (socket) => {
    */
   let settling = Promise.resolve()
   let finishTurn = null
+  let inFlight = false
+  let activeTurnPromise = null
+  let activeTurnResolve = null
+
+  const startTurn = () => {
+    inFlight = true
+    activeTurnPromise = new Promise((resolve) => {
+      activeTurnResolve = resolve
+    })
+  }
+
+  const endTurn = () => {
+    inFlight = false
+    activeTurnResolve?.()
+    activeTurnResolve = null
+    finishTurn?.()
+    finishTurn = null
+  }
 
   const turnFinished = () =>
     new Promise((resolve) => {
+      if (!inFlight) return resolve()
       finishTurn = resolve
     })
 
@@ -1521,8 +1540,7 @@ wss.on('connection', (socket) => {
             }
             // Whatever was waiting on this turn to finish can go now. This is
             // the only place a turn is genuinely over.
-            finishTurn?.()
-            finishTurn = null
+            endTurn()
             // One turn's tool ids are never referred to again, and these
             // otherwise grow for as long as the socket is open.
             seenTools.clear()
@@ -1544,6 +1562,7 @@ wss.on('connection', (socket) => {
       }
     } catch (err) {
       console.error('[jarvis] session error:', err)
+      endTurn()
       send({ type: 'error', message: String(err?.message ?? err) })
       // The stream is finished either way — nothing will ever be read from it
       // again. Leaving the socket open would leave the client believing it has
@@ -1582,6 +1601,7 @@ wss.on('connection', (socket) => {
       const id = typeof msg.id === 'string' ? msg.id : null
       void settling.then(() => {
         answering = id
+        startTurn()
         if (deliver) {
           const resolve = deliver
           deliver = null
@@ -1602,6 +1622,7 @@ wss.on('connection', (socket) => {
     }
 
     if (msg.type === 'interrupt') {
+      endTurn()
       // Held so the next question can wait for it rather than racing it.
       const stopped = turnFinished()
       settling = Promise.resolve(session.interrupt?.())
@@ -1615,10 +1636,23 @@ wss.on('connection', (socket) => {
     }
   })
 
-  socket.on('close', () => {
+  socket.on('close', async () => {
     console.log('[jarvis] client disconnected')
     closed = true
     deliver?.(null)
+
+    if (inFlight && activeTurnPromise) {
+      console.log('[jarvis] task in flight; allowing it to finish in background...')
+      try {
+        await Promise.race([
+          activeTurnPromise,
+          new Promise((resolve) => setTimeout(resolve, 15 * 60 * 1000)),
+        ])
+        console.log('[jarvis] in-flight task completed in background.')
+      } catch (err) {
+        console.error('[jarvis] background task error:', err)
+      }
+    }
     session.close?.()
   })
 })
