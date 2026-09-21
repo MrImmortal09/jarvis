@@ -52,11 +52,6 @@ import { env } from './config'
  *  people say his name and *then* think about what they wanted. */
 const AWAIT_SPEECH_MS = 14000
 
-/** After an answer, how long the mic stays open for a follow-up before he
- *  drops back to standby. Long enough that you don't have to say the name
- *  again to continue a thought. */
-const FOLLOW_UP_MS = 11000
-
 /** crypto.randomUUID needs a secure context, which a LAN address over plain
  *  http is not. Not worth failing a whole turn over an id. */
 const newId = () =>
@@ -66,8 +61,6 @@ const newId = () =>
 /** The same mishearings voice.ts accepts for the wake word — otherwise a turn
  *  that woke him as "travis" gets that word sent on to the model as a question. */
 const NAME = '(?:jarvis|jarvys|jervis|travis|jarviss|java\'s|jarv)'
-/** A bare vocative — "Jarvis", "hey jarvis" — with nothing asked. */
-const BARE_NAME = new RegExp(`^(?:hey|hi|ok|okay|yo)?\\s*${NAME}[\\s,.!?]*$`, 'i')
 /** A leading vocative on a real command: "Jarvis, what's the weather". */
 const LEADING_NAME = new RegExp(`^(?:hey|hi|ok|okay|yo)?\\s*${NAME}\\b[\\s,.:!?-]*`, 'i')
 
@@ -87,6 +80,8 @@ export default function App() {
   const booting = useRef(false)
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const voicePoll = useRef<ReturnType<typeof setInterval> | null>(null)
+  const spaceHeld = useRef(false)
+  const heldTranscript = useRef('')
 
   // -- helpers --------------------------------------------------------------
 
@@ -218,29 +213,19 @@ export default function App() {
         music.duck(false)
         store.getState().setActiveTool(null)
         music.working(false)
-        // Stay open. Having to say his name again to add one more sentence is
-        // the difference between a conversation and a vending machine.
-        listen(FOLLOW_UP_MS)
+        // Strictly listen only when holding Space; return to dormant standby.
+        goDormant()
       }
     }
   }
 
   // -- voice events ---------------------------------------------------------
 
-  /** What the voice loop should do with what it hears, derived from phase. */
+  /** What the voice loop should do with what it hears. Listen ONLY while holding Space. */
   const mode = (): VoiceMode => {
-    switch (store.getState().phase) {
-      case 'offline':
-      case 'boot':
-        return 'deaf'
-      case 'dormant':
-        return 'wake'
-      case 'waking':
-      case 'listening':
-        return 'command'
-      default:
-        return 'guard' // thinking, tooling, speaking
-    }
+    const p = store.getState().phase
+    if (p === 'offline' || p === 'boot') return 'deaf'
+    return spaceHeld.current ? 'command' : 'deaf'
   }
 
   const onWake = (trailing: string) => {
@@ -297,25 +282,16 @@ export default function App() {
   }
 
   const onUtterance = (text: string) => {
-    const phase = store.getState().phase
-    if (phase === 'offline' || phase === 'boot' || phase === 'dormant') return
-
-    // People keep using his name as a vocative once they're already talking to
-    // him. Strip it rather than sending "jarvis" to the model as a question.
-    if (BARE_NAME.test(text)) {
-      listen(AWAIT_SPEECH_MS)
-      return
-    }
+    if (!spaceHeld.current) return
     const said = text.replace(LEADING_NAME, '').trim()
-    if (!said) {
-      listen(AWAIT_SPEECH_MS)
-      return
+    if (said) {
+      heldTranscript.current = said
     }
-
-    void respond(said)
   }
 
   const onPartial = (text: string) => {
+    if (!spaceHeld.current) return
+    heldTranscript.current = text
     store.getState().setCaption(text)
   }
 
@@ -680,32 +656,79 @@ export default function App() {
         return
       }
 
-      // Space starts a turn without the wake word. Worth using while filming so
-      // a missed wake word doesn't cost a take.
-      if (e.code !== 'Space' || e.repeat) return
-      e.preventDefault()
+      // Hold Space to talk
+      if (e.code === 'Space') {
+        const activeEl = document.activeElement
+        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return
+        e.preventDefault()
+        if (e.repeat || spaceHeld.current) return
 
-      const phase = store.getState().phase
-      if (phase === 'offline') {
-        void powerOn()
-      } else if (phase === 'boot') {
-        /* ignore — the boot sequence owns the phase until it finishes */
-      } else if (
-        phase === 'thinking' ||
-        phase === 'tooling' ||
-        phase === 'speaking'
-      ) {
-        onSpeechStart()
-        listen(AWAIT_SPEECH_MS)
-      } else {
-        onWake('')
+        const currentPhase = store.getState().phase
+        if (currentPhase === 'offline') {
+          void powerOn()
+          return
+        }
+        if (currentPhase === 'boot') return
+
+        spaceHeld.current = true
+        heldTranscript.current = ''
+        clearIdle()
+        silence()
+
+        if (currentPhase === 'thinking' || currentPhase === 'tooling' || currentPhase === 'speaking') {
+          turn.current++
+          interrupt()
+          store.getState().setActiveTool(null)
+          music.working(false)
+          sfx.duck(false)
+          music.duck(false)
+        }
+
+        store.getState().setCaption('')
+        store.getState().setPhase('listening')
+        sfx.play('listen')
       }
     }
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return
+      const activeEl = document.activeElement
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return
+      if (!spaceHeld.current) return
+
+      e.preventDefault()
+      spaceHeld.current = false
+
+      voice.current?.flush?.()
+
+      setTimeout(() => {
+        const said = (heldTranscript.current || store.getState().caption).trim()
+        heldTranscript.current = ''
+        if (said) {
+          store.getState().setCaption('')
+          void respond(said)
+        } else {
+          goDormant()
+        }
+      }, 150)
+    }
+
+    const onBlur = () => {
+      if (spaceHeld.current) {
+        spaceHeld.current = false
+        goDormant()
+      }
+    }
+
     window.addEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
 
     return () => {
       cancelAnimationFrame(raf)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
       clearIdle()
       if (voicePoll.current) clearInterval(voicePoll.current)
       voice.current?.stop()

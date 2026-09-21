@@ -55,6 +55,8 @@ export type Voice = {
   stop: () => void
   /** True while a recogniser is actually running. */
   live: () => boolean
+  /** Flush and fire any currently buffered transcript immediately. */
+  flush?: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -585,6 +587,7 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
       diag.running = false
     },
     live: () => vad?.live() ?? false,
+    flush: () => assemble.flush(),
   }
 }
 
@@ -830,5 +833,9 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       }
     },
     live: () => running,
+    flush: () => {
+      emit()
+      assemble.flush()
+    },
   }
 }
