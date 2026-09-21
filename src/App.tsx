@@ -221,11 +221,12 @@ export default function App() {
 
   // -- voice events ---------------------------------------------------------
 
-  /** What the voice loop should do with what it hears. Listen ONLY while holding Space. */
+  /** What the voice loop should do with what it hears. Listen ONLY while holding Space or settling. */
   const mode = (): VoiceMode => {
     const p = store.getState().phase
     if (p === 'offline' || p === 'boot') return 'deaf'
-    return spaceHeld.current ? 'command' : 'deaf'
+    if (spaceHeld.current || p === 'listening') return 'command'
+    return 'deaf'
   }
 
   const onWake = (trailing: string) => {
@@ -282,17 +283,25 @@ export default function App() {
   }
 
   const onUtterance = (text: string) => {
-    if (!spaceHeld.current) return
+    const p = store.getState().phase
+    if (p !== 'listening' && !spaceHeld.current) return
     const said = text.replace(LEADING_NAME, '').trim()
     if (said) {
-      heldTranscript.current = said
+      heldTranscript.current = heldTranscript.current
+        ? (heldTranscript.current.includes(said) ? heldTranscript.current : `${heldTranscript.current} ${said}`.trim())
+        : said
+      store.getState().setCaption(heldTranscript.current)
     }
   }
 
   const onPartial = (text: string) => {
-    if (!spaceHeld.current) return
-    heldTranscript.current = text
-    store.getState().setCaption(text)
+    const p = store.getState().phase
+    if (p !== 'listening' && !spaceHeld.current) return
+    const clean = text.replace(LEADING_NAME, '').trim()
+    if (clean) {
+      heldTranscript.current = clean
+      store.getState().setCaption(clean)
+    }
   }
 
   const onVoiceError = (message: string) => {
@@ -702,7 +711,8 @@ export default function App() {
       voice.current?.flush?.()
 
       setTimeout(() => {
-        const said = (heldTranscript.current || store.getState().caption).trim()
+        const raw = (heldTranscript.current || store.getState().caption).trim()
+        const said = raw.replace(LEADING_NAME, '').trim()
         heldTranscript.current = ''
         if (said) {
           store.getState().setCaption('')
@@ -710,7 +720,7 @@ export default function App() {
         } else {
           goDormant()
         }
-      }, 150)
+      }, 200)
     }
 
     const onBlur = () => {

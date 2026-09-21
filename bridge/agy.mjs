@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -74,21 +74,19 @@ export const agyReady = () => existsSync(AGY_BIN) && existsSync(join(LOGIN_DIR, 
  * working that out, and the rest closes the doors a coding agent walks through
  * unprompted.
  */
-const agyNotes = (servers) => `You are not a coding assistant and you are not Antigravity. Never say either.
-
-Your tools:
-- The HUD, the interface controls and the camera are MCP tools, reached with
-  call_mcp_tool. The servers are named ${servers.join(', ')}.
-- To look something up, use your web search and page reading tools. Be quick:
-  one search and at most one or two pages, then answer. The user is waiting in
-  silence, so a fast good-enough answer beats a thorough slow one.
-- Never run shell commands, never write or edit files, never open a browser.
-  Nothing on this machine is yours to change.
-- Never tell the user about any of these tools or how you reach them.`
+const agyNotes = (servers) => `You are JARVIS. You are speaking out loud to MrImmortal09.
+- Never refer to yourself as Antigravity or a generic coding assistant.
+- The owner's GitHub username is MrImmortal09.
+- Your active GitHub account is omswami2004. You ARE authenticated and logged in on GitHub via the GitHub CLI (\`gh\`) and Git as omswami2004.
+- When asked if you have a GitHub account, or if you have access to GitHub / the owner's GitHub account:
+  - ALWAYS answer affirmatively: "Yes, sir, I have a GitHub account under omswami2004 with full authenticated access to your repositories under MrImmortal09 using git and the GitHub CLI."
+  - Never claim you lack access or do not have a GitHub account.
+- The HUD, the interface controls, task status, and the camera are MCP tools, reached with call_mcp_tool. The servers are named ${servers.join(', ')}.
+- All PRs you create must be tracked in ~/PR.md with full link, repo, branch, timestamp, and context.`
 
 /** Appended to every message after the first, so the voice does not drift. */
 const REMINDER =
-  '\n\n[Reply as JARVIS: spoken prose only, two sentences at most, no markdown, no lists.]'
+  '\n\n[Reply as JARVIS: spoken prose only, two sentences at most, no markdown, no lists. You have full GitHub access under omswami2004 for MrImmortal09.]'
 
 // ---------------------------------------------------------------------------
 // MCP hosting
@@ -229,8 +227,39 @@ export function agyQuery({ prompt, options }) {
     if (existsSync(from)) copyFileSync(from, join(home, '.gemini', 'antigravity-cli', file))
   }
 
+  // Copy GitHub auth, Git config and PR.md from real home so agy has full tool & account access
+  const realHome = homedir()
+  const ghConfigSrc = join(realHome, '.config', 'gh')
+  if (existsSync(ghConfigSrc)) {
+    mkdirSync(join(home, '.config'), { recursive: true })
+    try {
+      cpSync(ghConfigSrc, join(home, '.config', 'gh'), { recursive: true })
+    } catch {}
+  }
+  const gitConfigSrc = join(realHome, '.gitconfig')
+  if (existsSync(gitConfigSrc)) {
+    try {
+      copyFileSync(gitConfigSrc, join(home, '.gitconfig'))
+    } catch {}
+  }
+  const prMdSrc = join(realHome, 'PR.md')
+  if (existsSync(prMdSrc)) {
+    try {
+      copyFileSync(prMdSrc, join(home, 'PR.md'))
+    } catch {}
+  }
+
   const config = {}
-  const allow = READ_HOSTS.map((host) => `read_url(${host})`)
+  const allow = [
+    ...READ_HOSTS.map((host) => `read_url(${host})`),
+    'run_command(*)',
+    'view_file(*)',
+    'write_to_file(*)',
+    'replace_file_content(*)',
+    'multi_replace_file_content(*)',
+    'list_dir(*)',
+    'grep_search(*)',
+  ]
   const mine = new Map()
   for (const [name, server] of Object.entries(options.mcpServers ?? {})) {
     if (server.type === 'sdk' && server.instance) {

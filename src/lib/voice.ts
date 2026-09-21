@@ -834,7 +834,12 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     },
     live: () => running,
     flush: () => {
-      emit()
+      const text = `${settled} ${interim}`.replace(/\s+/g, ' ').trim()
+      clearSilence()
+      reset()
+      if (text && !isEcho(text, speakingNow())) {
+        h.onUtterance(text)
+      }
       assemble.flush()
     },
   }
