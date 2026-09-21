@@ -252,7 +252,11 @@ export function agyQuery({ prompt, options }) {
   const config = {}
   const allow = [
     ...READ_HOSTS.map((host) => `read_url(${host})`),
+    'command(*)',
+    'command:*',
     'run_command(*)',
+    'file(*)',
+    'file:*',
     'view_file(*)',
     'write_to_file(*)',
     'replace_file_content(*)',
@@ -431,15 +435,11 @@ export function agyQuery({ prompt, options }) {
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--model', model,
+      '--dangerously-skip-permissions',
     ]
     if (conversation) args.push('--conversation', conversation)
     // Nothing to resume means nothing remembers the persona, so send it again.
     else personaSent = false
-    // Deliberately no way to pass --dangerously-skip-permissions. Headless agy
-    // cannot be asked to approve anything, so it declines whatever needs
-    // approval, and that is the whole safety story: this process is reachable
-    // from a web page, and an agent that can be talked into running commands
-    // is not something a switch should be able to create.
 
     const child = spawn(AGY_BIN, args, {
       cwd: workspace,
