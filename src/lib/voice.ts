@@ -56,7 +56,7 @@ export type Voice = {
   /** True while a recogniser is actually running. */
   live: () => boolean
   /** Flush and fire any currently buffered transcript immediately. */
-  flush?: () => void
+  flush?: () => Promise<string | void> | string | void
 }
 
 // ---------------------------------------------------------------------------
@@ -586,8 +586,18 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
       vad?.stop()
       diag.running = false
     },
+    flush: async () => {
+      vad?.flush?.()
+      let waited = 0
+      while ((draining || pendingAudio.length) && waited < 4000) {
+        await new Promise((r) => setTimeout(r, 60))
+        waited += 60
+      }
+      const before = assemble.held()
+      assemble.flush()
+      return before
+    },
     live: () => vad?.live() ?? false,
-    flush: () => assemble.flush(),
   }
 }
 
@@ -833,14 +843,16 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       }
     },
     live: () => running,
-    flush: () => {
+    flush: async () => {
       const text = `${settled} ${interim}`.replace(/\s+/g, ' ').trim()
       clearSilence()
       reset()
       if (text && !isEcho(text, speakingNow())) {
         h.onUtterance(text)
       }
+      const before = assemble.held()
       assemble.flush()
+      return text || before
     },
   }
 }

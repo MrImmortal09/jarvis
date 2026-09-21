@@ -286,22 +286,23 @@ export default function App() {
     const p = store.getState().phase
     if (p !== 'listening' && !spaceHeld.current) return
     const said = text.replace(LEADING_NAME, '').trim()
-    if (said) {
-      heldTranscript.current = heldTranscript.current
-        ? (heldTranscript.current.includes(said) ? heldTranscript.current : `${heldTranscript.current} ${said}`.trim())
-        : said
-      store.getState().setCaption(heldTranscript.current)
-    }
+    if (!said || /^[\s.…]+$/.test(said)) return
+    heldTranscript.current = heldTranscript.current
+      ? (heldTranscript.current.includes(said) ? heldTranscript.current : `${heldTranscript.current} ${said}`.trim())
+      : said
+    store.getState().setCaption(heldTranscript.current)
   }
 
   const onPartial = (text: string) => {
     const p = store.getState().phase
     if (p !== 'listening' && !spaceHeld.current) return
     const clean = text.replace(LEADING_NAME, '').trim()
-    if (clean) {
-      heldTranscript.current = clean
-      store.getState().setCaption(clean)
+    if (!clean || /^[\s.…]+$/.test(clean)) {
+      if (clean) store.getState().setCaption(clean)
+      return
     }
+    heldTranscript.current = clean
+    store.getState().setCaption(clean)
   }
 
   const onVoiceError = (message: string) => {
@@ -699,7 +700,7 @@ export default function App() {
       }
     }
 
-    const onKeyUp = (e: KeyboardEvent) => {
+    const onKeyUp = async (e: KeyboardEvent) => {
       if (e.code !== 'Space') return
       const activeEl = document.activeElement
       if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return
@@ -708,19 +709,19 @@ export default function App() {
       e.preventDefault()
       spaceHeld.current = false
 
-      voice.current?.flush?.()
+      const flushed = await voice.current?.flush?.()
 
       setTimeout(() => {
-        const raw = (heldTranscript.current || store.getState().caption).trim()
+        const raw = (flushed || heldTranscript.current || store.getState().caption || '').trim()
         const said = raw.replace(LEADING_NAME, '').trim()
         heldTranscript.current = ''
-        if (said) {
+        if (said && !/^[\s.…]+$/.test(said)) {
           store.getState().setCaption('')
           void respond(said)
         } else {
           goDormant()
         }
-      }, 200)
+      }, 150)
     }
 
     const onBlur = () => {

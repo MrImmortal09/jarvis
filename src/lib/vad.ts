@@ -46,6 +46,8 @@ export type Vad = {
   live: () => boolean
   /** Live internals, for the diagnostics panel. */
   meter: () => { energy: number; floor: number; threshold: number; speaking: boolean }
+  /** Flush any active speech segment immediately. */
+  flush?: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -270,5 +272,6 @@ export async function startVad(h: VadHandlers): Promise<Vad> {
     },
     live: () => !stopped,
     meter: () => ({ energy: smoothEnergy, floor, threshold, speaking }),
+    flush: endSegment,
   }
 }
