@@ -1287,13 +1287,33 @@ wss.on('connection', (socket) => {
 
   // Send worker pool status on connection
   if (workerPool) {
-    send({ type: 'worker_init', workers: workerPool.summary() })
+    socket.send(JSON.stringify({ type: 'worker_init', workers: workerPool.summary() }))
   }
 
   /** Resolves the pending user message into the SDK's input generator. */
   let deliver = null
   let closed = false
   const inbox = []
+
+  async function* userMessages() {
+    while (!closed) {
+      const text =
+        inbox.shift() ??
+        (await new Promise((resolve) => {
+          deliver = resolve
+        }))
+      if (closed || text == null) return
+      yield {
+        type: 'user',
+        message: { role: 'user', content: text },
+        parent_tool_use_id: null,
+      }
+    }
+  }
+
+  const send = (msg) => {
+    if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg))
+  }
 
   // ---- Worker event forwarding ----
   // Forward worker thoughts/tool events to the browser for telemetry display,
@@ -1330,26 +1350,6 @@ wss.on('connection', (socket) => {
         inbox.push(notification)
       }
     }
-  }
-
-  async function* userMessages() {
-    while (!closed) {
-      const text =
-        inbox.shift() ??
-        (await new Promise((resolve) => {
-          deliver = resolve
-        }))
-      if (closed || text == null) return
-      yield {
-        type: 'user',
-        message: { role: 'user', content: text },
-        parent_tool_use_id: null,
-      }
-    }
-  }
-
-  const send = (msg) => {
-    if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg))
   }
 
   /**
